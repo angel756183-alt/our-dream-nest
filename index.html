@@ -8,21 +8,21 @@
     <!-- PWA Settings -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="南科存款">
+    <meta name="apple-mobile-web-app-title" content="世界南科成長計劃">
     <link rel="apple-touch-icon" href="icon.png">
 
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
 
-    <!-- React & ReactDOM (Remove crossorigin for better local file support) -->
+    <!-- React & ReactDOM -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     
     <!-- Babel for JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    <!-- Lucide React Icons (Fixed Version) -->
-    <script src="https://unpkg.com/lucide-react@0.468.0/dist/umd/lucide-react.min.js"></script>
+    <!-- Lucide React Icons (Using stable version 0.294.0) -->
+    <script src="https://unpkg.com/lucide-react@0.294.0/dist/umd/lucide-react.min.js"></script>
 
     <style>
         body {
@@ -46,21 +46,27 @@
 <body class="bg-slate-50 text-slate-800 pb-20">
     <div id="root"></div>
 
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Expose Firebase to global scope for React component
+        window.firebaseModules = { initializeApp, getAuth, signInAnonymously, getFirestore, doc, setDoc, onSnapshot };
+    </script>
+
     <script type="text/babel">
         const { useState, useMemo, useEffect } = React;
         
-        // Safely access Icons from global window.lucideReact
-        // If lucideReact fails to load, we provide a fallback to avoid crashing entirely, 
-        // though the UI will lack icons.
         const LucideIcons = window.lucideReact || {};
         const { 
             CheckCircle2, Circle, TrendingUp, PiggyBank, Calendar, AlertCircle, Wallet, 
             Clock, Edit2, Save, X, History, ArrowRight, DollarSign, Calculator, Check, 
-            Home, Building2, UserCircle2, PieChart, Coins 
+            Home, Building2, PieChart, Cloud, WifiOff
         } = LucideIcons;
 
-        // --- Configuration & Data Logic ---
-
+        // --- Configuration ---
         const MILESTONE_COSTS = {
             '2023-10-01': { name: '訂金+簽約金', cost: 580000, payer: 'shuan' },
             '2024-01-01': { name: '1樓底板工程', cost: 480000, payer: 'shuan' },
@@ -73,12 +79,12 @@
 
         const generateData = () => {
             const data = [];
-            let startDate = new Date(2023, 9, 1); // 2023-10
-            let endDate = new Date(2028, 12, 1);  // 2029-01 (End of 2028)
+            let startDate = new Date(2023, 9, 1);
+            let endDate = new Date(2028, 12, 1);
             let currentDate = new Date(startDate);
             let idCounter = 1;
 
-            // 0. 初期資金/調整 (為了補足 2025/12 的差額)
+            // 0. 初期資金
             data.push({
                 id: idCounter++,
                 type: 'income',
@@ -164,142 +170,183 @@
                 currentDate.setMonth(currentDate.getMonth() + 1);
             }
             
-            // Sort: Same date -> Expense first, Income last
             return data.sort((a, b) => {
                 const dateDiff = new Date(a.date) - new Date(b.date);
                 if (dateDiff !== 0) return dateDiff;
-                if (a.type !== b.type) {
-                    return a.type === 'expense' ? -1 : 1;
-                }
+                if (a.type !== b.type) return a.type === 'expense' ? -1 : 1;
                 return 0;
             });
         };
 
         const App = () => {
             const [handoverDate, setHandoverDate] = useState('2028-04-30');
-            const [isEditingHandover, setIsEditingHandover] = useState(false);
-            const [tempHandoverDate, setTempHandoverDate] = useState('2028-04-30');
-
             const [totalHousePrice, setTotalHousePrice] = useState(15910000); 
-            const [isEditingPrice, setIsEditingPrice] = useState(false);
-            const [tempPrice, setTempPrice] = useState(15910000);
+            const [transactions, setTransactions] = useState([]);
+            const [isLoaded, setIsLoaded] = useState(false);
+            const [isOnline, setIsOnline] = useState(false); // Cloud status
 
-            const [editingTransaction, setEditingTransaction] = useState(null);
-            const [editValue, setEditValue] = useState('');
-            const [expenseInput, setExpenseInput] = useState({ yao: '', shuan: '' });
-
-            // Generate Manifest dynamically for PWA
+            // --- Firebase Sync Logic ---
             useEffect(() => {
-                const manifest = {
-                    name: "世界南科存款",
-                    short_name: "南科存款",
-                    start_url: ".",
-                    display: "standalone",
-                    background_color: "#f8fafc",
-                    theme_color: "#e11d48",
-                    icons: [
-                        { src: "icon.png", sizes: "192x192", type: "image/png" },
-                        { src: "icon.png", sizes: "512x512", type: "image/png" }
-                    ]
+                const initFirebase = async () => {
+                    // 等待 Firebase 模組載入
+                    let attempts = 0;
+                    while (!window.firebaseModules && attempts < 10) {
+                        await new Promise(r => setTimeout(r, 200));
+                        attempts++;
+                    }
+
+                    if (!window.firebaseModules) {
+                        console.error("Firebase failed to load");
+                        loadLocalData();
+                        return;
+                    }
+
+                    const { initializeApp, getAuth, signInAnonymously, getFirestore, doc, setDoc, onSnapshot } = window.firebaseModules;
+
+                    // **********************************************************
+                    // ★★★ 已整合您的 Firebase Config ★★★
+                    // **********************************************************
+                    let firebaseConfig = {
+                        apiKey: "AIzaSyD2Fe27bWR2_FT0xHv2hDmtOFA9Swfj3GA",
+                        authDomain: "our-dream-nest.firebaseapp.com",
+                        projectId: "our-dream-nest",
+                        storageBucket: "our-dream-nest.firebasestorage.app",
+                        messagingSenderId: "284184533162",
+                        appId: "1:284184533162:web:07295a684260ae7cf618d3"
+                    };
+
+                    try {
+                        const app = initializeApp(firebaseConfig);
+                        const auth = getAuth(app);
+                        const db = getFirestore(app);
+                        // 使用固定ID讓兩人能連到同一個位置
+                        const appId = 'nanke-sweet-home'; 
+
+                        // 登入
+                        await signInAnonymously(auth);
+                        setIsOnline(true);
+
+                        // 使用 "Public" 路徑以便兩人共享同一份資料
+                        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'savings_v2', 'shared_tracker');
+
+                        // 監聽雲端資料
+                        onSnapshot(docRef, (snapshot) => {
+                            if (snapshot.exists()) {
+                                const data = snapshot.data();
+                                const baseData = generateData();
+                                
+                                // 合併雲端紀錄與基礎資料
+                                setHandoverDate(data.handoverDate || '2028-04-30');
+                                setTotalHousePrice(data.totalHousePrice || 15910000);
+                                
+                                const merged = baseData.map(item => {
+                                    const saved = data.overrides && data.overrides[item.id];
+                                    if (saved) return { ...item, ...saved };
+                                    
+                                    // 預設已過期且未被儲存的收入設為已繳
+                                    const itemDate = new Date(item.date);
+                                    const cutoffDate = new Date();
+                                    if (itemDate <= cutoffDate && item.type === 'income') {
+                                        return { ...item, yaoPaidDate: item.date, shuanPaidDate: item.date };
+                                    }
+                                    return item;
+                                });
+                                setTransactions(merged);
+                                setIsLoaded(true);
+                            } else {
+                                // 第一次使用，寫入預設資料
+                                saveDataToCloud(db, appId, {
+                                    handoverDate: '2028-04-30',
+                                    totalHousePrice: 15910000,
+                                    overrides: {}
+                                });
+                                loadLocalData(); // 先顯示本地資料
+                            }
+                        }, (error) => {
+                            console.error("Sync error:", error);
+                            setIsOnline(false);
+                            loadLocalData();
+                        });
+
+                        // 儲存函數掛載到 window 以便其他函數調用
+                        window.saveToCloud = (data) => saveDataToCloud(db, appId, data);
+
+                    } catch (err) {
+                        console.error("Firebase init failed:", err);
+                        setIsOnline(false);
+                        loadLocalData();
+                    }
                 };
-                const stringManifest = JSON.stringify(manifest);
-                const blob = new Blob([stringManifest], {type: 'application/json'});
-                const manifestURL = URL.createObjectURL(blob);
-                
-                let linkManifest = document.querySelector('link[rel="manifest"]');
-                if (!linkManifest) {
-                    linkManifest = document.createElement('link');
-                    linkManifest.rel = 'manifest';
-                    document.head.appendChild(linkManifest);
-                }
-                linkManifest.href = manifestURL;
+
+                initFirebase();
             }, []);
 
-            const [transactions, setTransactions] = useState(() => {
-                const initialData = generateData();
-                const cutoffDate = new Date(); // Today
-                return initialData.map(item => {
+            const loadLocalData = () => {
+                const baseData = generateData();
+                const cutoffDate = new Date();
+                setTransactions(baseData.map(item => {
                     const itemDate = new Date(item.date);
-                    // Pre-check income items before today
                     if (itemDate <= cutoffDate && item.type === 'income') {
                         return { ...item, yaoPaidDate: item.date, shuanPaidDate: item.date };
                     }
                     return item;
+                }));
+                setIsLoaded(true);
+            };
+
+            const saveDataToCloud = async (db, appId, data) => {
+                const { doc, setDoc } = window.firebaseModules;
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'savings_v2', 'shared_tracker');
+                await setDoc(docRef, data, { merge: true });
+            };
+
+            // Trigger Save (Centralized)
+            const handleSave = () => {
+                if (!window.saveToCloud) return; // Offline mode
+
+                const overrides = {};
+                transactions.forEach(t => {
+                    if (t.yaoPaidDate || t.shuanPaidDate || t.paidDate || t.type === 'expense') {
+                        overrides[t.id] = {
+                            yaoAmount: t.yaoAmount,
+                            shuanAmount: t.shuanAmount,
+                            yaoPaidDate: t.yaoPaidDate,
+                            shuanPaidDate: t.shuanPaidDate,
+                            paidDate: t.paidDate,
+                            paidDetails: t.paidDetails
+                        };
+                    }
                 });
-            });
 
-            const formatMoney = (amount) => {
-                return new Intl.NumberFormat('zh-TW', { style: 'currency', currency: 'TWD', minimumFractionDigits: 0 }).format(amount);
+                window.saveToCloud({
+                    handoverDate,
+                    totalHousePrice,
+                    overrides
+                });
             };
 
-            const getTodayString = () => {
-                const today = new Date();
-                return today.toISOString().split('T')[0];
-            };
-
-            // Actions
-            const startEditing = (item, person) => {
-                const currentAmount = person === 'yao' ? item.yaoAmount : item.shuanAmount;
-                setEditingTransaction({ id: item.id, person });
-                setEditValue(currentAmount.toString());
-            };
-
-            const cancelEditing = () => {
-                setEditingTransaction(null);
-                setEditValue('');
-            };
-
-            const confirmSaving = (id, person) => {
-                const newAmount = parseInt(editValue, 10);
-                if (isNaN(newAmount)) return;
-
-                setTransactions(prev => prev.map(item => {
-                    if (item.id === id && item.type === 'income') {
-                        const dateField = person === 'yao' ? 'yaoPaidDate' : 'shuanPaidDate';
-                        const amountField = person === 'yao' ? 'yaoAmount' : 'shuanAmount';
-                        return {
-                            ...item,
-                            [amountField]: newAmount,
-                            [dateField]: getTodayString()
-                        };
-                    }
-                    return item;
-                }));
-                setEditingTransaction(null);
-            };
-
-            const undoSaving = (id, person) => {
-                setTransactions(prev => prev.map(item => {
-                    if (item.id === id && item.type === 'income') {
-                        const field = person === 'yao' ? 'yaoPaidDate' : 'shuanPaidDate';
-                        return { ...item, [field]: null };
-                    }
-                    return item;
-                }));
-            };
-
-            const confirmExpense = (id, cost) => {
-                const yaoPay = parseInt(expenseInput.yao || 0, 10);
-                const shuanPay = parseInt(expenseInput.shuan || 0, 10);
-                
-                if (yaoPay + shuanPay <= 0) {
-                    if (!window.confirm("未輸入任何繳款金額，確定要標記為已支付嗎？(將視為直接從公基金扣款)")) {
-                        return;
-                    }
+            // Auto-save whenever critical data changes (debounce could be added for perf)
+            useEffect(() => {
+                if (isLoaded && isOnline) {
+                    const timeoutId = setTimeout(handleSave, 500); // Debounce save
+                    return () => clearTimeout(timeoutId);
                 }
+            }, [transactions, handoverDate, totalHousePrice]);
 
-                setTransactions(prev => prev.map(item => {
-                    if (item.id === id && item.type === 'expense') {
-                        return {
-                            ...item,
-                            paidDate: getTodayString(),
-                            paidDetails: { yao: yaoPay, shuan: shuanPay }
-                        };
-                    }
-                    return item;
-                }));
-                setExpenseInput({ yao: '', shuan: '' });
-            };
+
+            // UI States
+            const [isEditingHandover, setIsEditingHandover] = useState(false);
+            const [tempHandoverDate, setTempHandoverDate] = useState('2028-04-30');
+            const [isEditingPrice, setIsEditingPrice] = useState(false);
+            const [tempPrice, setTempPrice] = useState(15910000);
+            const [isEditingLoan, setIsEditingLoan] = useState(false);
+            const [tempLoan, setTempLoan] = useState(0);
+            const [editingTransaction, setEditingTransaction] = useState(null);
+            const [editValue, setEditValue] = useState('');
+            const [expenseInput, setExpenseInput] = useState({ yao: '', shuan: '' });
+
+            const formatMoney = (amount) => new Intl.NumberFormat('zh-TW', { style: 'currency', currency: 'TWD', minimumFractionDigits: 0 }).format(amount);
+            const getTodayString = () => new Date().toISOString().split('T')[0];
 
             // Stats
             const stats = useMemo(() => {
@@ -330,13 +377,8 @@
                 const currentPool = (yaoSaved + shuanSaved) - expensesPaidFromPool;
 
                 return {
-                    yaoSaved,
-                    shuanSaved,
-                    yaoPaidDirectly,
-                    shuanPaidDirectly,
-                    currentPool,
-                    totalExpensePaid,
-                    totalPlannedCost,
+                    yaoSaved, shuanSaved, yaoPaidDirectly, shuanPaidDirectly,
+                    currentPool, totalExpensePaid, totalPlannedCost,
                     loanAmount: totalHousePrice - totalPlannedCost
                 };
             }, [transactions, totalHousePrice]);
@@ -346,7 +388,6 @@
                     yao: { adjustment: 0, monthly: 0, bonus: 0, yearEnd: 0, total: 0 },
                     shuan: { adjustment: 0, monthly: 0, bonus: 0, yearEnd: 0, total: 0 }
                 };
-                
                 transactions.forEach(t => {
                     if (t.type === 'income') {
                         if (t.yaoPaidDate) {
@@ -355,7 +396,6 @@
                             else if (t.subType === 'bonus') result.yao.bonus += t.yaoAmount;
                             else if (t.subType === 'year-end') result.yao.yearEnd += t.yaoAmount;
                         }
-                        
                         if (t.shuanPaidDate) {
                             if (t.subType === 'adjustment') result.shuan.adjustment += t.shuanAmount;
                             else if (t.subType === 'monthly') result.shuan.monthly += t.shuanAmount;
@@ -364,89 +404,70 @@
                         }
                     }
                 });
-                
                 result.yao.total = result.yao.adjustment + result.yao.monthly + result.yao.bonus + result.yao.yearEnd;
                 result.shuan.total = result.shuan.adjustment + result.shuan.monthly + result.shuan.bonus + result.shuan.yearEnd;
-                
                 return result;
             }, [transactions]);
 
-            const nextExpense = useMemo(() => {
-                return transactions.find(t => t.type === 'expense' && !t.paidDate);
-            }, [transactions]);
+            const nextExpense = useMemo(() => transactions.find(t => t.type === 'expense' && !t.paidDate), [transactions]);
 
             const balanceStatus = useMemo(() => {
                 if (!nextExpense) return { status: 'all_clear', diff: 0 };
                 const currentInputTotal = (parseInt(expenseInput.yao || 0) + parseInt(expenseInput.shuan || 0));
                 const remainingCostFromPool = Math.max(0, nextExpense.cost - currentInputTotal);
                 const diff = stats.currentPool - remainingCostFromPool;
-                return {
-                    status: diff >= 0 ? 'sufficient' : 'insufficient',
-                    diff: diff
-                };
+                return { status: diff >= 0 ? 'sufficient' : 'insufficient', diff: diff };
             }, [stats.currentPool, nextExpense, expenseInput]);
 
             const countdown = useMemo(() => {
                 const target = new Date(handoverDate);
-                const today = new Date();
-                const diffTime = target - today;
-                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                return diffDays > 0 ? diffDays : 0;
+                const diff = Math.ceil((target - new Date()) / (1000 * 60 * 60 * 24));
+                return diff > 0 ? diff : 0;
             }, [handoverDate]);
 
-            const saveHandoverDate = () => {
-                setHandoverDate(tempHandoverDate);
-                setIsEditingHandover(false);
+            // UI Actions
+            const saveHandoverDateUI = () => { setHandoverDate(tempHandoverDate); setIsEditingHandover(false); };
+            const savePriceUI = () => { setTotalHousePrice(tempPrice); setIsEditingPrice(false); };
+            const saveLoanUI = () => { setTotalHousePrice(tempLoan + stats.totalPlannedCost); setIsEditingLoan(false); };
+
+            const startEditing = (item, person) => {
+                setEditingTransaction({ id: item.id, person });
+                setEditValue(person === 'yao' ? item.yaoAmount : item.shuanAmount);
             };
-            
-            const savePrice = () => {
-                setTotalHousePrice(tempPrice);
-                setIsEditingPrice(false);
+            const confirmSaving = (id, person) => {
+                const newAmount = parseInt(editValue, 10);
+                if (isNaN(newAmount)) return;
+                setTransactions(prev => prev.map(item => {
+                    if (item.id === id) {
+                        const dateField = person === 'yao' ? 'yaoPaidDate' : 'shuanPaidDate';
+                        const amountField = person === 'yao' ? 'yaoAmount' : 'shuanAmount';
+                        return { ...item, [amountField]: newAmount, [dateField]: getTodayString() };
+                    }
+                    return item;
+                }));
+                setEditingTransaction(null);
+            };
+            const undoSaving = (id, person) => {
+                setTransactions(prev => prev.map(item => {
+                    if (item.id === id) {
+                        const field = person === 'yao' ? 'yaoPaidDate' : 'shuanPaidDate';
+                        return { ...item, [field]: null };
+                    }
+                    return item;
+                }));
+            };
+            const confirmExpenseAction = (id) => {
+                const yaoPay = parseInt(expenseInput.yao || 0, 10);
+                const shuanPay = parseInt(expenseInput.shuan || 0, 10);
+                if (yaoPay + shuanPay <= 0 && !window.confirm("未輸入金額，確定直接從公基金扣款？")) return;
+                setTransactions(prev => prev.map(item => {
+                    if (item.id === id) return { ...item, paidDate: getTodayString(), paidDetails: { yao: yaoPay, shuan: shuanPay } };
+                    return item;
+                }));
+                setExpenseInput({ yao: '', shuan: '' });
             };
 
-            const renderSavingButton = (item, person) => {
-                const isYao = person === 'yao';
-                const isPaid = isYao ? item.yaoPaidDate : item.shuanPaidDate;
-                const amount = isYao ? item.yaoAmount : item.shuanAmount;
-                const isEditing = editingTransaction?.id === item.id && editingTransaction?.person === person;
-
-                if (isEditing) {
-                    return (
-                        <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-blue-300 shadow-sm animate-in fade-in zoom-in duration-200">
-                            <input
-                                type="number"
-                                value={editValue}
-                                onChange={(e) => setEditValue(e.target.value)}
-                                className="w-20 text-sm p-1 border rounded bg-slate-50 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                autoFocus
-                            />
-                            <button onClick={() => confirmSaving(item.id, person)} className="p-1 bg-green-500 text-white rounded hover:bg-green-600">
-                                {Check && <Check size={16} />}
-                            </button>
-                            <button onClick={cancelEditing} className="p-1 bg-slate-200 text-slate-500 rounded hover:bg-slate-300">
-                                {X && <X size={16} />}
-                            </button>
-                        </div>
-                    );
-                }
-
-                return (
-                    <button 
-                        onClick={() => isPaid ? undoSaving(item.id, person) : startEditing(item, person)}
-                        className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-all min-w-[100px] justify-between ${
-                            isPaid 
-                                ? 'bg-green-100 border-green-200 text-green-800' 
-                                : 'bg-white border-slate-200 text-slate-400 hover:border-blue-400 hover:bg-blue-50'
-                        }`}
-                    >
-                        <span className="text-sm font-bold text-slate-600">{isYao ? '堯' : '璇'}</span>
-                        <div className="text-right">
-                            <span className="block text-xs font-bold font-mono">{formatMoney(amount)}</span>
-                            <span className="block text-[10px] opacity-70">{isPaid ? '已入帳' : '確認存款'}</span>
-                        </div>
-                    </button>
-                );
-            };
+            if (!isLoaded) return <div className="min-h-screen flex items-center justify-center text-slate-400">載入中...</div>;
 
             return (
                 <div className="max-w-4xl mx-auto space-y-6 p-4">
@@ -454,22 +475,20 @@
                     <div className="bg-white rounded-2xl shadow-sm p-6 border-l-4 border-rose-500">
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                             <div>
-                                <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-                                    {PiggyBank && <PiggyBank className="text-rose-500" />}
-                                    世界南科成家基金
-                                </h1>
+                                <div className="flex items-center gap-2">
+                                    <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">{PiggyBank && <PiggyBank className="text-rose-500" />} 世界南科成家基金</h1>
+                                    {isOnline ? 
+                                        <span className="bg-green-100 text-green-700 text-[10px] px-2 py-1 rounded-full flex items-center gap-1 font-bold">{Cloud && <Cloud size={12}/>} 雲端同步中</span> : 
+                                        <span className="bg-slate-100 text-slate-500 text-[10px] px-2 py-1 rounded-full flex items-center gap-1 font-bold">{WifiOff && <WifiOff size={12}/>} 離線模式</span>
+                                    }
+                                </div>
                                 <div className="flex items-center gap-2 mt-1">
                                     {Building2 && <Building2 size={14} className="text-slate-400" />}
                                     <span className="text-sm text-slate-500">房屋總價: </span>
                                     {isEditingPrice ? (
                                         <div className="flex items-center gap-1">
-                                            <input 
-                                                type="number" 
-                                                value={tempPrice} 
-                                                onChange={(e) => setTempPrice(Number(e.target.value))} 
-                                                className="w-32 text-sm p-1 border rounded bg-slate-50"
-                                            />
-                                            <button onClick={savePrice} className="text-green-600">{Save && <Save size={14}/>}</button>
+                                            <input type="number" value={tempPrice} onChange={(e) => setTempPrice(Number(e.target.value))} className="w-32 text-sm p-1 border rounded bg-slate-50"/>
+                                            <button onClick={savePriceUI} className="text-green-600">{Save && <Save size={14}/>}</button>
                                             <button onClick={() => setIsEditingPrice(false)} className="text-red-500">{X && <X size={14}/>}</button>
                                         </div>
                                     ) : (
@@ -480,33 +499,20 @@
                                     )}
                                 </div>
                             </div>
-                            
                             <div className="bg-rose-50 px-4 py-3 rounded-xl flex items-center gap-4 w-full md:w-auto">
-                                <div className="bg-rose-100 p-2 rounded-lg">
-                                    {Clock && <Clock className="text-rose-600" size={24} />}
-                                </div>
+                                <div className="bg-rose-100 p-2 rounded-lg">{Clock && <Clock className="text-rose-600" size={24} />}</div>
                                 <div className="flex-1">
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <span className="text-xs font-bold text-rose-400 uppercase tracking-wide">交屋倒數</span>
-                                        {!isEditingHandover && (
-                                            <button onClick={() => { setTempHandoverDate(handoverDate); setIsEditingHandover(true); }} className="text-slate-400 hover:text-rose-500 transition-colors">
-                                                {Edit2 && <Edit2 size={14} />}
-                                            </button>
-                                        )}
-                                    </div>
+                                    <div className="flex items-center gap-2 mb-1"><span className="text-xs font-bold text-rose-400 uppercase tracking-wide">交屋倒數</span></div>
                                     {isEditingHandover ? (
                                         <div className="flex items-center gap-2">
                                             <input type="date" value={tempHandoverDate} onChange={(e) => setTempHandoverDate(e.target.value)} className="text-sm p-1 border rounded" />
-                                            <button onClick={saveHandoverDate} className="text-green-600">{Save && <Save size={16}/>}</button>
+                                            <button onClick={saveHandoverDateUI} className="text-green-600">{Save && <Save size={16}/>}</button>
                                             <button onClick={() => setIsEditingHandover(false)} className="text-red-500">{X && <X size={16}/>}</button>
                                         </div>
                                     ) : (
-                                        <div className="flex flex-col">
-                                            <div className="flex items-baseline gap-1">
-                                                <span className="text-2xl font-bold text-rose-700">{countdown}</span>
-                                                <span className="text-sm text-rose-600">天</span>
-                                            </div>
-                                            <span className="text-xs text-rose-400 mt-1">預計: {handoverDate}</span>
+                                        <div className="flex flex-col group cursor-pointer" onClick={() => { setTempHandoverDate(handoverDate); setIsEditingHandover(true); }}>
+                                            <div className="flex items-baseline gap-1"><span className="text-2xl font-bold text-rose-700">{countdown}</span><span className="text-sm text-rose-600">天</span></div>
+                                            <div className="flex items-center gap-1"><span className="text-xs text-rose-400 mt-1 decoration-dotted underline underline-offset-2">預計: {handoverDate}</span>{Edit2 && <div className="opacity-0 group-hover:opacity-100 transition-opacity"><Edit2 size={12} className="text-rose-400" /></div>}</div>
                                         </div>
                                     )}
                                 </div>
@@ -518,225 +524,127 @@
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="bg-slate-800 text-slate-200 rounded-2xl p-5 shadow-sm md:col-span-2 flex flex-col md:flex-row justify-between items-center gap-4">
                             <div className="flex items-center gap-4">
-                                <div className="bg-slate-700 p-3 rounded-full">
-                                    {Home && <Home className="text-blue-400" size={24} />}
-                                </div>
-                                <div>
-                                    <h3 className="text-xs font-bold text-slate-400 uppercase">已知自備款/工程款總額</h3>
-                                    <div className="text-2xl font-bold text-white">{formatMoney(stats.totalPlannedCost)}</div>
-                                </div>
+                                <div className="bg-slate-700 p-3 rounded-full">{Home && <Home className="text-blue-400" size={24} />}</div>
+                                <div><h3 className="text-xs font-bold text-slate-400 uppercase">已知自備款/工程款總額</h3><div className="text-2xl font-bold text-white">{formatMoney(stats.totalPlannedCost)}</div></div>
                             </div>
                             <div className="hidden md:block w-px h-10 bg-slate-600"></div>
                             <div className="flex items-center gap-4">
                                 <div>
                                     <h3 className="text-xs font-bold text-slate-400 uppercase text-right">預估貸款金額</h3>
-                                    <div className="text-2xl font-bold text-emerald-400">{formatMoney(stats.loanAmount)}</div>
+                                    {isEditingLoan ? (
+                                        <div className="flex items-center justify-end gap-1">
+                                            <input type="number" value={tempLoan} onChange={(e) => setTempLoan(Number(e.target.value))} className="w-32 text-lg p-1 border rounded bg-slate-700 text-emerald-400 border-slate-600 text-right focus:outline-none focus:ring-1 focus:ring-emerald-500" autoFocus />
+                                            <button onClick={saveLoanUI} className="text-emerald-500 hover:text-emerald-400 p-1">{Save && <Save size={16}/>}</button>
+                                            <button onClick={() => setIsEditingLoan(false)} className="text-slate-500 hover:text-slate-400 p-1">{X && <X size={16}/>}</button>
+                                        </div>
+                                    ) : (
+                                        <div className="text-2xl font-bold text-emerald-400 cursor-pointer hover:text-emerald-300 transition-colors flex items-center justify-end gap-2 group" onClick={() => { setTempLoan(stats.loanAmount); setIsEditingLoan(true); }}>
+                                            {formatMoney(stats.loanAmount)}
+                                            {Edit2 && <Edit2 size={14} className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-500" />}
+                                        </div>
+                                    )}
                                     <div className="text-[10px] text-slate-500 text-right">(總價 - 自備款)</div>
                                 </div>
                             </div>
                         </div>
 
                         <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 flex flex-col justify-center space-y-4 md:col-span-1">
-                            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1">
-                                個人累積存款 <span className="text-[10px] text-slate-400 font-normal">(不含自付工程款)</span>
-                            </h2>
+                            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1">個人累積存款 <span className="text-[10px] text-slate-400 font-normal">(不含自付)</span></h2>
                             <div className="flex justify-between items-center px-2">
                                 <span className="text-lg font-bold text-slate-700">堯</span>
-                                <div className="text-right">
-                                    <span className="block text-sm font-bold text-blue-600 font-mono">{formatMoney(stats.yaoSaved)}</span>
-                                    {stats.yaoPaidDirectly > 0 && <span className="block text-[10px] text-slate-400">另自付: {formatMoney(stats.yaoPaidDirectly)}</span>}
-                                </div>
+                                <div className="text-right"><span className="block text-sm font-bold text-blue-600 font-mono">{formatMoney(stats.yaoSaved)}</span>{stats.yaoPaidDirectly > 0 && <span className="block text-[10px] text-slate-400">另自付: {formatMoney(stats.yaoPaidDirectly)}</span>}</div>
                             </div>
                             <div className="w-full h-px bg-slate-100"></div>
                             <div className="flex justify-between items-center px-2">
                                 <span className="text-lg font-bold text-slate-700">璇</span>
-                                <div className="text-right">
-                                    <span className="block text-sm font-bold text-pink-600 font-mono">{formatMoney(stats.shuanSaved)}</span>
-                                    {stats.shuanPaidDirectly > 0 && <span className="block text-[10px] text-slate-400">另自付: {formatMoney(stats.shuanPaidDirectly)}</span>}
-                                </div>
+                                <div className="text-right"><span className="block text-sm font-bold text-pink-600 font-mono">{formatMoney(stats.shuanSaved)}</span>{stats.shuanPaidDirectly > 0 && <span className="block text-[10px] text-slate-400">另自付: {formatMoney(stats.shuanPaidDirectly)}</span>}</div>
                             </div>
                         </div>
 
                         <div className="bg-gradient-to-br from-indigo-600 to-blue-700 rounded-2xl p-6 text-white shadow-lg md:col-span-1 relative overflow-hidden">
-                            <div className="absolute top-0 right-0 p-4 opacity-10">
-                                {Wallet && <Wallet size={120} />}
-                            </div>
+                            <div className="absolute top-0 right-0 p-4 opacity-10">{Wallet && <Wallet size={120} />}</div>
                             <div className="relative z-10">
-                                <h2 className="text-indigo-100 text-sm font-medium mb-1 flex items-center gap-2">
-                                    {Calculator && <Calculator size={16} />} 目前公基金餘額 (現金)
-                                </h2>
+                                <h2 className="text-indigo-100 text-sm font-medium mb-1 flex items-center gap-2">{Calculator && <Calculator size={16} />} 目前公基金餘額 (現金)</h2>
                                 <p className="text-4xl font-bold mb-4 tracking-tight">{formatMoney(stats.currentPool)}</p>
-                                
                                 <div className="flex flex-col sm:flex-row gap-4 text-xs text-indigo-200 bg-indigo-800/30 p-3 rounded-lg w-fit">
-                                    <div>
-                                        <span className="block opacity-70">兩人總存款</span>
-                                        <span className="font-bold">{formatMoney(stats.yaoSaved + stats.shuanSaved)}</span>
-                                    </div>
+                                    <div><span className="block opacity-70">兩人總存款</span><span className="font-bold">{formatMoney(stats.yaoSaved + stats.shuanSaved)}</span></div>
                                     <div className="hidden sm:block w-px bg-indigo-500/50"></div>
-                                    <div>
-                                        <span className="block opacity-70">公基金已支出</span>
-                                        <span className="font-bold">{formatMoney(stats.totalExpensePaid - (stats.yaoPaidDirectly + stats.shuanPaidDirectly))}</span>
-                                    </div>
+                                    <div><span className="block opacity-70">公基金已支出</span><span className="font-bold">{formatMoney(stats.totalExpensePaid - (stats.yaoPaidDirectly + stats.shuanPaidDirectly))}</span></div>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    {/* Breakdown Chart */}
+                    {/* Breakdown */}
                     <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 shadow-sm">
-                        <h3 className="font-bold text-slate-700 flex items-center gap-2 mb-4">
-                            {PieChart && <PieChart size={18} className="text-purple-500"/>} 目前資金結構 (已實際入帳)
-                        </h3>
+                        <h3 className="font-bold text-slate-700 flex items-center gap-2 mb-4">{PieChart && <PieChart size={18} className="text-purple-500"/>} 目前資金結構 (已實際入帳)</h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="bg-white p-4 rounded-xl border border-slate-100">
-                                <div className="flex justify-between items-center mb-3 pb-2 border-b border-slate-100">
-                                    <span className="font-bold text-slate-700">堯</span>
-                                    <span className="font-bold text-blue-600">{formatMoney(breakdown.yao.total)}</span>
-                                </div>
+                                <div className="flex justify-between items-center mb-3 pb-2 border-b border-slate-100"><span className="font-bold text-slate-700">堯</span><span className="font-bold text-blue-600">{formatMoney(breakdown.yao.total)}</span></div>
                                 <div className="space-y-2 text-sm text-slate-600">
-                                    <div className="flex justify-between">
-                                        <span>月存累積</span>
-                                        <span className="font-mono">{formatMoney(breakdown.yao.monthly)}</span>
-                                    </div>
-                                    <div className="flex justify-between">
-                                        <span>季度分紅</span>
-                                        <span className="font-mono">{formatMoney(breakdown.yao.bonus)}</span>
-                                    </div>
-                                    <div className="flex justify-between">
-                                        <span>年終獎金</span>
-                                        <span className="font-mono">{formatMoney(breakdown.yao.yearEnd)}</span>
-                                    </div>
-                                    <div className="flex justify-between text-xs text-slate-400">
-                                        <span>初期資金/校正</span>
-                                        <span className="font-mono">{formatMoney(breakdown.yao.adjustment)}</span>
-                                    </div>
+                                    <div className="flex justify-between"><span>月存累積</span><span className="font-mono">{formatMoney(breakdown.yao.monthly)}</span></div>
+                                    <div className="flex justify-between"><span>季度分紅</span><span className="font-mono">{formatMoney(breakdown.yao.bonus)}</span></div>
+                                    <div className="flex justify-between"><span>年終獎金</span><span className="font-mono">{formatMoney(breakdown.yao.yearEnd)}</span></div>
+                                    <div className="flex justify-between text-xs text-slate-400"><span>初期資金/校正</span><span className="font-mono">{formatMoney(breakdown.yao.adjustment)}</span></div>
                                 </div>
                             </div>
-
                             <div className="bg-white p-4 rounded-xl border border-slate-100">
-                                <div className="flex justify-between items-center mb-3 pb-2 border-b border-slate-100">
-                                    <span className="font-bold text-slate-700">璇</span>
-                                    <span className="font-bold text-pink-600">{formatMoney(breakdown.shuan.total)}</span>
-                                </div>
+                                <div className="flex justify-between items-center mb-3 pb-2 border-b border-slate-100"><span className="font-bold text-slate-700">璇</span><span className="font-bold text-pink-600">{formatMoney(breakdown.shuan.total)}</span></div>
                                 <div className="space-y-2 text-sm text-slate-600">
-                                    <div className="flex justify-between">
-                                        <span>月存累積</span>
-                                        <span className="font-mono">{formatMoney(breakdown.shuan.monthly)}</span>
-                                    </div>
-                                    <div className="flex justify-between">
-                                        <span>季度分紅</span>
-                                        <span className="font-mono">{formatMoney(breakdown.shuan.bonus)}</span>
-                                    </div>
-                                    <div className="flex justify-between">
-                                        <span>年終獎金</span>
-                                        <span className="font-mono">{formatMoney(breakdown.shuan.yearEnd)}</span>
-                                    </div>
-                                    <div className="flex justify-between text-xs text-slate-400">
-                                        <span>初期資金/校正</span>
-                                        <span className="font-mono">{formatMoney(breakdown.shuan.adjustment)}</span>
-                                    </div>
+                                    <div className="flex justify-between"><span>月存累積</span><span className="font-mono">{formatMoney(breakdown.shuan.monthly)}</span></div>
+                                    <div className="flex justify-between"><span>季度分紅</span><span className="font-mono">{formatMoney(breakdown.shuan.bonus)}</span></div>
+                                    <div className="flex justify-between"><span>年終獎金</span><span className="font-mono">{formatMoney(breakdown.shuan.yearEnd)}</span></div>
+                                    <div className="flex justify-between text-xs text-slate-400"><span>初期資金/校正</span><span className="font-mono">{formatMoney(breakdown.shuan.adjustment)}</span></div>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    {/* Next Expense */}
+                    {/* Next Expense Card */}
                     {nextExpense ? (
                         <div className="bg-white rounded-2xl shadow-md border-t-4 border-amber-400 overflow-hidden">
                             <div className="p-6">
                                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
                                     <div>
-                                        <h2 className="text-slate-500 text-sm font-bold uppercase tracking-wider mb-1 flex items-center gap-2">
-                                            {AlertCircle && <AlertCircle size={16} className="text-amber-500" />} 下一期應繳工程款
-                                        </h2>
-                                        <div className="flex items-baseline gap-3">
-                                            <span className="text-3xl font-bold text-slate-800">{nextExpense.label}</span>
-                                            <span className="text-sm text-slate-400 font-mono">預計日期: {nextExpense.date}</span>
-                                        </div>
+                                        <h2 className="text-slate-500 text-sm font-bold uppercase tracking-wider mb-1 flex items-center gap-2">{AlertCircle && <AlertCircle size={16} className="text-amber-500" />} 下一期應繳工程款</h2>
+                                        <div className="flex items-baseline gap-3"><span className="text-3xl font-bold text-slate-800">{nextExpense.label}</span><span className="text-sm text-slate-400 font-mono">預計日期: {nextExpense.date}</span></div>
                                     </div>
-                                    
-                                    <div className={`px-4 py-3 rounded-xl border flex flex-col items-end min-w-[180px] ${
-                                        balanceStatus.status === 'sufficient' 
-                                            ? 'bg-green-50 border-green-200 text-green-700' 
-                                            : 'bg-red-50 border-red-200 text-red-700'
-                                    }`}>
+                                    <div className={`px-4 py-3 rounded-xl border flex flex-col items-end min-w-[180px] ${balanceStatus.status === 'sufficient' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
                                         <span className="text-xs font-bold uppercase mb-1">資金預估</span>
-                                        <div className="flex items-center gap-1">
-                                            <span className="text-lg font-bold">
-                                                {balanceStatus.diff >= 0 ? '+' : ''}{formatMoney(balanceStatus.diff)}
-                                            </span>
-                                        </div>
-                                        <span className="text-xs opacity-80">
-                                            {balanceStatus.status === 'sufficient' ? '足夠支付' : '資金不足'}
-                                        </span>
+                                        <div className="flex items-center gap-1"><span className="text-lg font-bold">{balanceStatus.diff >= 0 ? '+' : ''}{formatMoney(balanceStatus.diff)}</span></div>
+                                        <span className="text-xs opacity-80">{balanceStatus.status === 'sufficient' ? '足夠支付' : '資金不足'}</span>
                                     </div>
                                 </div>
-
                                 <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
                                     <div className="mb-4 flex items-center gap-3">
-                                        <div className="bg-white p-2 rounded-full shadow-sm border">
-                                            {DollarSign && <DollarSign className="text-amber-600" />}
-                                        </div>
-                                        <div>
-                                            <span className="block text-sm text-slate-500">本期應繳總金額</span>
-                                            <span className="block text-xl font-bold text-slate-800">{formatMoney(nextExpense.cost)}</span>
-                                        </div>
+                                        <div className="bg-white p-2 rounded-full shadow-sm border">{DollarSign && <DollarSign className="text-amber-600" />}</div>
+                                        <div><span className="block text-sm text-slate-500">本期應繳總金額</span><span className="block text-xl font-bold text-slate-800">{formatMoney(nextExpense.cost)}</span></div>
                                     </div>
-
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                                         <div>
                                             <label className="block text-xs font-bold text-slate-500 mb-1">堯 自付/代墊 (若不從公基金扣)</label>
-                                            <input 
-                                                type="number" 
-                                                placeholder="輸入金額" 
-                                                value={expenseInput.yao}
-                                                onChange={(e) => setExpenseInput(prev => ({...prev, yao: e.target.value}))}
-                                                className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none"
-                                            />
+                                            <input type="number" placeholder="輸入金額" value={expenseInput.yao} onChange={(e) => setExpenseInput(prev => ({...prev, yao: e.target.value}))} className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none"/>
                                         </div>
                                         <div>
                                             <label className="block text-xs font-bold text-slate-500 mb-1">璇 自付/代墊 (若不從公基金扣)</label>
-                                            <input 
-                                                type="number" 
-                                                placeholder="輸入金額" 
-                                                value={expenseInput.shuan}
-                                                onChange={(e) => setExpenseInput(prev => ({...prev, shuan: e.target.value}))}
-                                                className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none"
-                                            />
+                                            <input type="number" placeholder="輸入金額" value={expenseInput.shuan} onChange={(e) => setExpenseInput(prev => ({...prev, shuan: e.target.value}))} className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none"/>
                                         </div>
                                     </div>
-                                    
                                     <div className="flex justify-end">
-                                        <button 
-                                            onClick={() => confirmExpense(nextExpense.id, nextExpense.cost)}
-                                            disabled={balanceStatus.status === 'insufficient' && (parseInt(expenseInput.yao||0) + parseInt(expenseInput.shuan||0)) === 0}
-                                            className={`px-6 py-3 rounded-lg font-bold flex items-center gap-2 transition-all shadow-sm w-full sm:w-auto justify-center ${
-                                                balanceStatus.status === 'sufficient' || (parseInt(expenseInput.yao||0) + parseInt(expenseInput.shuan||0)) > 0
-                                                    ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-amber-200'
-                                                    : 'bg-slate-300 text-slate-500 cursor-not-allowed'
-                                            }`}
-                                        >
-                                            確認繳款 {ArrowRight && <ArrowRight size={18} />}
-                                        </button>
+                                        <button onClick={() => confirmExpenseAction(nextExpense.id)} disabled={balanceStatus.status === 'insufficient' && (parseInt(expenseInput.yao||0) + parseInt(expenseInput.shuan||0)) === 0} className={`px-6 py-3 rounded-lg font-bold flex items-center gap-2 transition-all shadow-sm w-full sm:w-auto justify-center ${balanceStatus.status === 'sufficient' || (parseInt(expenseInput.yao||0) + parseInt(expenseInput.shuan||0)) > 0 ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-amber-200' : 'bg-slate-300 text-slate-500 cursor-not-allowed'}`}>確認繳款 {ArrowRight && <ArrowRight size={18} />}</button>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     ) : (
-                        <div className="bg-green-100 rounded-2xl p-8 text-center text-green-800 border border-green-200">
-                            {CheckCircle2 && <CheckCircle2 size={48} className="mx-auto mb-3" />}
-                            <h2 className="text-2xl font-bold">所有工程款項皆已支付完畢！</h2>
-                        </div>
+                        <div className="bg-green-100 rounded-2xl p-8 text-center text-green-800 border border-green-200">{CheckCircle2 && <CheckCircle2 size={48} className="mx-auto mb-3" />}<h2 className="text-2xl font-bold">所有工程款項皆已支付完畢！</h2></div>
                     )}
 
-                    {/* History List */}
+                    {/* List */}
                     <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
                         <div className="p-4 border-b border-slate-100 bg-slate-50">
-                            <h3 className="font-bold text-slate-700 flex items-center gap-2">
-                                {History && <History size={18} />} 資金流動歷程
-                            </h3>
+                            <h3 className="font-bold text-slate-700 flex items-center gap-2">{History && <History size={18} />} 資金流動歷程</h3>
                         </div>
-                        
                         <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
                             {transactions.map((item) => {
                                 if (item.subType === 'adjustment') {
@@ -744,59 +652,36 @@
                                         <div key={item.id} className="p-4 bg-slate-100 border-l-4 border-slate-400">
                                             <div className="flex items-center gap-4">
                                                 <div className="p-2 bg-white rounded-lg text-slate-500">{Wallet && <Wallet size={20} />}</div>
-                                                <div>
-                                                    <p className="font-bold text-slate-800">{item.label}</p>
-                                                    <p className="text-xs text-slate-500">日期: {item.date}</p>
-                                                </div>
-                                                <div className="flex-1 text-right text-xs font-mono text-slate-500">
-                                                    <span className="mr-3">堯補正: {formatMoney(item.yaoAmount)}</span>
-                                                    <span>璇補正: {formatMoney(item.shuanAmount)}</span>
-                                                </div>
+                                                <div><p className="font-bold text-slate-800">{item.label}</p><p className="text-xs text-slate-500">日期: {item.date}</p></div>
+                                                <div className="flex-1 text-right text-xs font-mono text-slate-500"><span className="mr-3">堯補正: {formatMoney(item.yaoAmount)}</span><span>璇補正: {formatMoney(item.shuanAmount)}</span></div>
                                             </div>
                                         </div>
                                     )
                                 }
-
                                 if (item.type === 'expense') {
                                     return (
                                         <div key={item.id} className={`p-4 ${item.paidDate ? 'bg-amber-50/40' : 'bg-white'}`}>
                                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                                                 <div className="flex items-center gap-4">
-                                                    <div className={`p-2 rounded-lg ${item.paidDate ? 'bg-amber-200 text-amber-800' : 'bg-slate-100 text-slate-400'}`}>
-                                                        {AlertCircle && <AlertCircle size={24} />}
-                                                    </div>
-                                                    <div>
-                                                        <p className="font-bold text-slate-800">{item.label}</p>
-                                                        <p className="text-xs text-slate-500">日期: {item.date}</p>
-                                                        <p className="text-sm font-bold text-red-600 mt-1">費用: {formatMoney(item.cost)}</p>
-                                                    </div>
+                                                    <div className={`p-2 rounded-lg ${item.paidDate ? 'bg-amber-200 text-amber-800' : 'bg-slate-100 text-slate-400'}`}>{AlertCircle && <AlertCircle size={24} />}</div>
+                                                    <div><p className="font-bold text-slate-800">{item.label}</p><p className="text-xs text-slate-500">日期: {item.date}</p><p className="text-sm font-bold text-red-600 mt-1">費用: {formatMoney(item.cost)}</p></div>
                                                 </div>
-
                                                 {item.paidDate ? (
                                                     <div className="flex flex-col items-end min-w-[120px]">
-                                                        <span className="flex items-center gap-1 text-green-600 font-bold text-sm">
-                                                            {CheckCircle2 && <CheckCircle2 size={16} />} 已支付
-                                                        </span>
+                                                        <span className="flex items-center gap-1 text-green-600 font-bold text-sm">{CheckCircle2 && <CheckCircle2 size={16} />} 已支付</span>
                                                         {item.paidDetails && (item.paidDetails.yao > 0 || item.paidDetails.shuan > 0) ? (
-                                                            <div className="text-xs text-slate-500 mt-1 text-right">
-                                                                {item.paidDetails.yao > 0 && <div>堯自付: {formatMoney(item.paidDetails.yao)}</div>}
-                                                                {item.paidDetails.shuan > 0 && <div>璇自付: {formatMoney(item.paidDetails.shuan)}</div>}
-                                                            </div>
-                                                        ) : (
-                                                            <div className="text-[10px] text-slate-400 mt-1">由公基金支付</div>
-                                                        )}
+                                                            <div className="text-xs text-slate-500 mt-1 text-right">{item.paidDetails.yao > 0 && <div>堯自付: {formatMoney(item.paidDetails.yao)}</div>}{item.paidDetails.shuan > 0 && <div>璇自付: {formatMoney(item.paidDetails.shuan)}</div>}</div>
+                                                        ) : (<div className="text-[10px] text-slate-400 mt-1">由公基金支付</div>)}
                                                     </div>
-                                                ) : (
-                                                    <div className="px-3 py-1 bg-slate-100 text-slate-500 text-xs rounded-full self-start sm:self-center">
-                                                        待支付
-                                                    </div>
-                                                )}
+                                                ) : (<div className="px-3 py-1 bg-slate-100 text-slate-500 text-xs rounded-full self-start sm:self-center">待支付</div>)}
                                             </div>
                                         </div>
                                     );
                                 }
-
                                 const isFullySaved = item.yaoPaidDate && item.shuanPaidDate;
+                                const isEditingYao = editingTransaction?.id === item.id && editingTransaction?.person === 'yao';
+                                const isEditingShuan = editingTransaction?.id === item.id && editingTransaction?.person === 'shuan';
+
                                 return (
                                     <div key={item.id} className={`p-4 hover:bg-slate-50 transition-colors ${isFullySaved ? 'bg-green-50/30' : ''}`}>
                                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -804,15 +689,34 @@
                                                 <div className={`p-2 rounded-lg ${item.subType === 'bonus' ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600'}`}>
                                                     {item.subType === 'bonus' && Wallet ? <Wallet size={20} /> : (Calendar && <Calendar size={20} />)}
                                                 </div>
-                                                <div>
-                                                    <p className="font-bold text-slate-700">{item.label}</p>
-                                                    <p className="text-xs text-slate-400">合計存入: {formatMoney(item.yaoAmount + item.shuanAmount)}</p>
-                                                </div>
+                                                <div><p className="font-bold text-slate-700">{item.label}</p><p className="text-xs text-slate-400">合計存入: {formatMoney(item.yaoAmount + item.shuanAmount)}</p></div>
                                             </div>
-
                                             <div className="flex gap-2 sm:gap-4 flex-1 justify-end items-center">
-                                                {renderSavingButton(item, 'yao')}
-                                                {renderSavingButton(item, 'shuan')}
+                                                {isEditingYao ? (
+                                                    <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-blue-300 shadow-sm animate-in fade-in zoom-in duration-200">
+                                                        <input type="number" value={editValue} onChange={(e) => setEditValue(e.target.value)} className="w-20 text-sm p-1 border rounded bg-slate-50 focus:outline-none focus:ring-1 focus:ring-blue-500" autoFocus />
+                                                        <button onClick={() => confirmSaving(item.id, 'yao')} className="p-1 bg-green-500 text-white rounded hover:bg-green-600">{Check && <Check size={16} />}</button>
+                                                        <button onClick={cancelEditing} className="p-1 bg-slate-200 text-slate-500 rounded hover:bg-slate-300">{X && <X size={16} />}</button>
+                                                    </div>
+                                                ) : (
+                                                    <button onClick={() => item.yaoPaidDate ? undoSaving(item.id, 'yao') : startEditing(item, 'yao')} className={`flex items-center gap-2 px-4 py-3 rounded-lg border transition-all min-w-[140px] sm:min-w-[160px] justify-between ${item.yaoPaidDate ? 'bg-green-100 border-green-200 text-green-800' : 'bg-white border-slate-200 text-slate-400 hover:border-blue-400 hover:bg-blue-50'}`}>
+                                                        <span className="text-sm font-bold text-slate-600">堯</span>
+                                                        <div className="text-right"><span className="block text-xs font-bold font-mono">{formatMoney(item.yaoAmount)}</span><span className="block text-[10px] opacity-70">{item.yaoPaidDate ? '已入帳' : '確認存款'}</span></div>
+                                                    </button>
+                                                )}
+                                                
+                                                {isEditingShuan ? (
+                                                    <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-blue-300 shadow-sm animate-in fade-in zoom-in duration-200">
+                                                        <input type="number" value={editValue} onChange={(e) => setEditValue(e.target.value)} className="w-20 text-sm p-1 border rounded bg-slate-50 focus:outline-none focus:ring-1 focus:ring-blue-500" autoFocus />
+                                                        <button onClick={() => confirmSaving(item.id, 'shuan')} className="p-1 bg-green-500 text-white rounded hover:bg-green-600">{Check && <Check size={16} />}</button>
+                                                        <button onClick={cancelEditing} className="p-1 bg-slate-200 text-slate-500 rounded hover:bg-slate-300">{X && <X size={16} />}</button>
+                                                    </div>
+                                                ) : (
+                                                    <button onClick={() => item.shuanPaidDate ? undoSaving(item.id, 'shuan') : startEditing(item, 'shuan')} className={`flex items-center gap-2 px-4 py-3 rounded-lg border transition-all min-w-[140px] sm:min-w-[160px] justify-between ${item.shuanPaidDate ? 'bg-green-100 border-green-200 text-green-800' : 'bg-white border-slate-200 text-slate-400 hover:border-blue-400 hover:bg-blue-50'}`}>
+                                                        <span className="text-sm font-bold text-slate-600">璇</span>
+                                                        <div className="text-right"><span className="block text-xs font-bold font-mono">{item.shuanAmount}</span><span className="block text-[10px] opacity-70">{item.shuanPaidDate ? '已入帳' : '確認存款'}</span></div>
+                                                    </button>
+                                                )}
                                             </div>
                                         </div>
                                     </div>
