@@ -9,7 +9,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="世界南科成長中">
-    <meta name="theme-color" content="#e11d48">
+    <meta name="theme-color" content="#0f172a">
     <link rel="apple-touch-icon" href="icon.png">
 
     <!-- Tailwind CSS -->
@@ -22,30 +22,39 @@
     <!-- Babel for JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    <!-- Lucide React Icons -->
-    <script src="https://unpkg.com/lucide-react@0.294.0/dist/umd/lucide-react.min.js"></script>
+    <!-- Lucide React Icons (Using version 0.263.1 for best UMD compatibility) -->
+    <script src="https://unpkg.com/lucide-react@0.263.1/dist/umd/lucide-react.min.js"></script>
 
     <style>
         body {
             -webkit-tap-highlight-color: transparent;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f8fafc;
         }
         /* Hide scrollbar */
         ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-track { background: #f8fafc; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
         
-        /* Toast Animation */
+        /* Animation */
+        @keyframes fade-in-up {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in-up {
+            animation: fade-in-up 0.5s ease-out forwards;
+        }
+        
         @keyframes slide-up {
             from { transform: translate(-50%, 100%); opacity: 0; }
             to { transform: translate(-50%, 0); opacity: 1; }
         }
         .toast-enter {
-            animation: slide-up 0.3s ease-out forwards;
+            animation: slide-up 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
         }
     </style>
 </head>
-<body class="bg-slate-50 text-slate-800 pb-20">
+<body class="text-slate-600 pb-24">
     <div id="root"></div>
 
     <!-- Firebase SDKs -->
@@ -58,16 +67,22 @@
     </script>
 
     <script type="text/babel">
-        const { useState, useMemo, useEffect } = React;
+        const { useState, useMemo, useEffect, useRef } = React;
         
         const LucideIcons = window.lucideReact || {};
         const { 
             CheckCircle2, Circle, TrendingUp, PiggyBank, Calendar, AlertCircle, Wallet, 
             Clock, Edit2, Save, X, History, ArrowRight, DollarSign, Calculator, Check, 
-            Home, Building2, PieChart, Cloud, WifiOff, AlertTriangle
+            Home, Building2, PieChart, Cloud, WifiOff, AlertTriangle, Heart, Lock, KeyRound
         } = LucideIcons;
 
-        // --- Configuration ---
+        // **********************************************************
+        // ★★★ 設定區 ★★★
+        // **********************************************************
+        
+        // 設定您的共用密碼 (可以自行修改這裡)
+        const APP_PASSWORD = "2028"; 
+        
         const MILESTONE_COSTS = {
             '2023-10-01': { name: '訂金+簽約金', cost: 580000, payer: 'shuan' },
             '2024-01-01': { name: '1樓底板工程', cost: 480000, payer: 'shuan' },
@@ -179,12 +194,78 @@
             });
         };
 
-        const App = () => {
+        // --- Login Screen Component ---
+        const LoginScreen = ({ onLogin }) => {
+            const [input, setInput] = useState("");
+            const [error, setError] = useState(false);
+
+            useEffect(() => {
+                // Check if previously logged in
+                const savedAuth = localStorage.getItem('nanke_auth_token');
+                if (savedAuth === APP_PASSWORD) {
+                    onLogin();
+                }
+            }, []);
+
+            const handleLogin = (e) => {
+                e.preventDefault();
+                if (input === APP_PASSWORD) {
+                    localStorage.setItem('nanke_auth_token', input); // Remember login
+                    onLogin();
+                } else {
+                    setError(true);
+                    setTimeout(() => setError(false), 2000);
+                }
+            };
+
+            return (
+                <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-50">
+                    <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-sm border border-slate-100 animate-fade-in-up">
+                        <div className="flex justify-center mb-6">
+                            <div className="p-4 bg-teal-50 rounded-full text-teal-600">
+                                {Lock && <Lock size={48} />}
+                            </div>
+                        </div>
+                        <h2 className="text-2xl font-bold text-center text-slate-800 mb-2">歡迎回來</h2>
+                        <p className="text-slate-400 text-center mb-6 text-sm">請輸入家庭密碼以繼續</p>
+                        
+                        <form onSubmit={handleLogin} className="space-y-4">
+                            <div className="relative">
+                                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                                    {KeyRound && <KeyRound size={20} />}
+                                </div>
+                                <input 
+                                    type="password" 
+                                    value={input}
+                                    onChange={(e) => setInput(e.target.value)}
+                                    placeholder="輸入密碼 (預設: 2028)"
+                                    className={`w-full pl-10 pr-4 py-3 rounded-xl border outline-none transition-all ${error ? 'border-red-400 bg-red-50 text-red-600' : 'border-slate-200 focus:border-teal-500 focus:ring-2 focus:ring-teal-100'}`}
+                                    autoFocus
+                                />
+                            </div>
+                            <button 
+                                type="submit"
+                                className="w-full bg-teal-600 text-white py-3 rounded-xl font-bold hover:bg-teal-700 active:scale-95 transition-all shadow-md shadow-teal-200"
+                            >
+                                解鎖進入
+                            </button>
+                        </form>
+                        {error && <p className="text-red-500 text-xs text-center mt-3 font-bold animate-pulse">密碼錯誤，請再試一次</p>}
+                    </div>
+                    <div className="mt-8 text-slate-400 text-xs flex items-center gap-1">
+                        {Heart && <Heart size={12} className="fill-rose-300 text-rose-300" />} 世界南科成長計劃
+                    </div>
+                </div>
+            );
+        };
+
+        const MainApp = () => {
             const [handoverDate, setHandoverDate] = useState('2028-04-30');
             const [totalHousePrice, setTotalHousePrice] = useState(15910000); 
             const [transactions, setTransactions] = useState([]);
             const [isLoaded, setIsLoaded] = useState(false);
             const [isOnline, setIsOnline] = useState(false); 
+            const [lastSyncTime, setLastSyncTime] = useState('');
             const [toast, setToast] = useState(null); 
 
             useEffect(() => {
@@ -244,6 +325,8 @@
                                 });
                                 setTransactions(merged);
                                 setIsLoaded(true);
+                                const now = new Date();
+                                setLastSyncTime(now.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
                             } else {
                                 saveDataToCloud(db, appId, {
                                     handoverDate: '2028-04-30',
@@ -311,13 +394,7 @@
                 });
             };
 
-            useEffect(() => {
-                if (isLoaded && isOnline) {
-                    const timeoutId = setTimeout(handleSave, 500); 
-                    return () => clearTimeout(timeoutId);
-                }
-            }, [transactions, handoverDate, totalHousePrice]);
-
+            // Removed auto-save useEffect to prevent loop. Save is now triggered by user actions.
 
             const [isEditingHandover, setIsEditingHandover] = useState(false);
             const [tempHandoverDate, setTempHandoverDate] = useState('2028-04-30');
@@ -329,7 +406,6 @@
             const [editValue, setEditValue] = useState('');
             const [expenseInput, setExpenseInput] = useState({ yao: '', shuan: '' });
 
-            // PWA Manifest Generation with maskable icon support
             useEffect(() => {
                 const manifest = {
                     name: "世界南科成長計劃",
@@ -337,7 +413,7 @@
                     start_url: ".",
                     display: "standalone",
                     background_color: "#f8fafc",
-                    theme_color: "#e11d48",
+                    theme_color: "#0f172a",
                     icons: [
                         { src: "icon.png", sizes: "192x192", type: "image/png", purpose: "any maskable" },
                         { src: "icon.png", sizes: "512x512", type: "image/png", purpose: "any maskable" }
@@ -435,24 +511,35 @@
                 return { status: diff >= 0 ? 'sufficient' : 'insufficient', diff: diff };
             }, [stats.currentPool, nextExpense, expenseInput]);
 
-            // Fix 1: Robust Date Calculation for Countdown
             const countdown = useMemo(() => {
                 if (!handoverDate) return 0;
-                // Parse date string manually to ensure local time treatment (avoid UTC off-by-one errors)
                 const [y, m, d] = handoverDate.split('-').map(Number);
-                const target = new Date(y, m - 1, d); // Construct date in local time (00:00:00)
-                
+                const target = new Date(y, m - 1, d); 
                 const today = new Date();
-                today.setHours(0, 0, 0, 0); // Normalize today to midnight
-                
+                today.setHours(0, 0, 0, 0); 
                 const diff = Math.ceil((target - today) / (1000 * 60 * 60 * 24));
                 return diff > 0 ? diff : 0;
             }, [handoverDate]);
 
             // UI Actions
-            const saveHandoverDateUI = () => { setHandoverDate(tempHandoverDate); setIsEditingHandover(false); };
-            const savePriceUI = () => { setTotalHousePrice(tempPrice); setIsEditingPrice(false); };
-            const saveLoanUI = () => { setTotalHousePrice(tempLoan + stats.totalPlannedCost); setIsEditingLoan(false); };
+            const saveHandoverDateUI = () => { 
+                const newDate = tempHandoverDate;
+                setHandoverDate(newDate); 
+                setIsEditingHandover(false);
+                saveAllToCloud(transactions, newDate, totalHousePrice);
+            };
+            const savePriceUI = () => { 
+                const newPrice = tempPrice;
+                setTotalHousePrice(newPrice); 
+                setIsEditingPrice(false);
+                saveAllToCloud(transactions, handoverDate, newPrice);
+            };
+            const saveLoanUI = () => { 
+                const newPrice = tempLoan + stats.totalPlannedCost;
+                setTotalHousePrice(newPrice); 
+                setIsEditingLoan(false);
+                saveAllToCloud(transactions, handoverDate, newPrice);
+            };
 
             // Modified: Check date with confirmation
             const startEditing = (item, person) => {
@@ -471,92 +558,109 @@
             const confirmSaving = (id, person) => {
                 const newAmount = parseInt(editValue, 10);
                 if (isNaN(newAmount)) return;
-                setTransactions(prev => prev.map(item => {
+                
+                const newTransactions = transactions.map(item => {
                     if (item.id === id) {
                         const dateField = person === 'yao' ? 'yaoPaidDate' : 'shuanPaidDate';
                         const amountField = person === 'yao' ? 'yaoAmount' : 'shuanAmount';
                         return { ...item, [amountField]: newAmount, [dateField]: getTodayString() };
                     }
                     return item;
-                }));
+                });
+                
+                setTransactions(newTransactions);
                 setEditingTransaction(null);
+                saveAllToCloud(newTransactions, handoverDate, totalHousePrice);
             };
+
             const undoSaving = (id, person) => {
-                setTransactions(prev => prev.map(item => {
+                const newTransactions = transactions.map(item => {
                     if (item.id === id) {
                         const field = person === 'yao' ? 'yaoPaidDate' : 'shuanPaidDate';
                         return { ...item, [field]: null };
                     }
                     return item;
-                }));
+                });
+                setTransactions(newTransactions);
+                saveAllToCloud(newTransactions, handoverDate, totalHousePrice);
             };
+
             const confirmExpenseAction = (id) => {
                 const yaoPay = parseInt(expenseInput.yao || 0, 10);
                 const shuanPay = parseInt(expenseInput.shuan || 0, 10);
                 if (yaoPay + shuanPay <= 0 && !window.confirm("未輸入金額，確定直接從公基金扣款？")) return;
-                setTransactions(prev => prev.map(item => {
+                
+                const newTransactions = transactions.map(item => {
                     if (item.id === id) return { ...item, paidDate: getTodayString(), paidDetails: { yao: yaoPay, shuan: shuanPay } };
                     return item;
-                }));
+                });
+                setTransactions(newTransactions);
                 setExpenseInput({ yao: '', shuan: '' });
+                saveAllToCloud(newTransactions, handoverDate, totalHousePrice);
             };
 
-            if (!isLoaded) return <div className="min-h-screen flex items-center justify-center text-slate-400">載入中...</div>;
+            if (!isLoaded) return <div className="min-h-screen flex items-center justify-center text-stone-400 bg-stone-50">載入中...</div>;
 
             return (
                 <div className="max-w-4xl mx-auto space-y-6 p-4 relative">
                     {/* Toast Notification */}
                     {toast && (
-                        <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 bg-slate-800 text-white px-6 py-3 rounded-full shadow-lg z-50 flex items-center gap-3 toast-enter">
-                            {AlertTriangle && <AlertTriangle size={20} className="text-yellow-400" />}
+                        <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 bg-stone-800 text-orange-50 px-6 py-3 rounded-full shadow-lg z-50 flex items-center gap-3 toast-enter">
+                            {AlertTriangle && <AlertTriangle size={20} className="text-orange-400" />}
                             <span className="text-sm font-bold">{toast}</span>
                         </div>
                     )}
 
                     {/* Header */}
-                    <div className="bg-white rounded-2xl shadow-sm p-6 border-l-4 border-rose-500">
+                    <div className="bg-white rounded-2xl shadow-sm p-6 border-b-2 border-slate-100">
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                             <div>
                                 <div className="flex items-center gap-2" onClick={() => window.location.reload()}>
-                                    <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-                                        {PiggyBank && <PiggyBank className="text-rose-500" />} 世界南科成家基金
+                                    <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2 tracking-tight">
+                                        {Heart && <Heart className="text-teal-600 fill-teal-600" />} 世界南科成長計劃
                                     </h1>
                                     {isOnline ? 
-                                        <span className="bg-green-100 text-green-700 text-[10px] px-2 py-1 rounded-full flex items-center gap-1 font-bold">{Cloud && <Cloud size={12}/>} 雲端同步中</span> : 
+                                        <div className="flex flex-col items-start">
+                                            <span className="bg-teal-50 text-teal-700 text-[10px] px-2 py-1 rounded-full flex items-center gap-1 font-bold">
+                                                {Cloud && <Cloud size={12}/>} 同步中
+                                            </span>
+                                            {lastSyncTime && <span className="text-[10px] text-slate-400 ml-1 mt-0.5">{lastSyncTime} 更新</span>}
+                                        </div>
+                                         : 
                                         <span className="bg-slate-100 text-slate-500 text-[10px] px-2 py-1 rounded-full flex items-center gap-1 font-bold">{WifiOff && <WifiOff size={12}/>} 離線</span>
                                     }
                                 </div>
-                                <div className="flex items-center gap-2 mt-1">
+                                <div className="flex items-center gap-2 mt-2">
                                     {Building2 && <Building2 size={14} className="text-slate-400" />}
                                     <span className="text-sm text-slate-500">房屋總價: </span>
                                     {isEditingPrice ? (
                                         <div className="flex items-center gap-1">
-                                            <input type="number" value={tempPrice} onChange={(e) => setTempPrice(Number(e.target.value))} className="w-32 text-sm p-1 border rounded bg-slate-50"/>
-                                            <button onClick={savePriceUI} className="text-green-600">{Save && <Save size={14}/>}</button>
-                                            <button onClick={() => setIsEditingPrice(false)} className="text-red-500">{X && <X size={14}/>}</button>
+                                            <input type="number" value={tempPrice} onChange={(e) => setTempPrice(Number(e.target.value))} className="w-32 text-sm p-1 border rounded-full bg-slate-50 text-slate-700 px-2"/>
+                                            <button onClick={savePriceUI} className="text-teal-600 hover:bg-teal-50 rounded-full p-1">{Save && <Save size={14}/>}</button>
+                                            <button onClick={() => setIsEditingPrice(false)} className="text-slate-400 hover:bg-slate-50 rounded-full p-1">{X && <X size={14}/>}</button>
                                         </div>
                                     ) : (
                                         <div className="flex items-center gap-1 group cursor-pointer" onClick={() => { setTempPrice(totalHousePrice); setIsEditingPrice(true); }}>
-                                            <span className="text-sm font-bold text-slate-700 underline decoration-slate-300 decoration-dotted underline-offset-4">{formatMoney(totalHousePrice)}</span>
-                                            {Edit2 && <Edit2 size={12} className="text-slate-300 group-hover:text-rose-400" />}
+                                            <span className="text-sm font-bold text-slate-700 underline decoration-slate-200 decoration-dotted underline-offset-4">{formatMoney(totalHousePrice)}</span>
+                                            {Edit2 && <Edit2 size={12} className="text-slate-300 group-hover:text-teal-500" />}
                                         </div>
                                     )}
                                 </div>
                             </div>
-                            <div className="bg-rose-50 px-4 py-3 rounded-xl flex items-center gap-4 w-full md:w-auto">
-                                <div className="bg-rose-100 p-2 rounded-lg">{Clock && <Clock className="text-rose-600" size={24} />}</div>
+                            <div className="bg-slate-50 px-4 py-3 rounded-xl flex items-center gap-4 w-full md:w-auto border border-slate-100">
+                                <div className="text-teal-600">{Clock && <Clock size={24} />}</div>
                                 <div className="flex-1">
-                                    <div className="flex items-center gap-2 mb-1"><span className="text-xs font-bold text-rose-400 uppercase tracking-wide">交屋倒數</span></div>
+                                    <div className="flex items-center gap-2 mb-1"><span className="text-xs font-bold text-slate-500 uppercase tracking-wide">交屋倒數</span></div>
                                     {isEditingHandover ? (
                                         <div className="flex items-center gap-2">
-                                            <input type="date" value={tempHandoverDate} onChange={(e) => setTempHandoverDate(e.target.value)} className="text-sm p-1 border rounded" />
-                                            <button onClick={saveHandoverDateUI} className="text-green-600">{Save && <Save size={16}/>}</button>
-                                            <button onClick={() => setIsEditingHandover(false)} className="text-red-500">{X && <X size={16}/>}</button>
+                                            <input type="date" value={tempHandoverDate} onChange={(e) => setTempHandoverDate(e.target.value)} className="text-sm p-1 border rounded-full bg-white px-2" />
+                                            <button onClick={saveHandoverDateUI} className="text-teal-600">{Save && <Save size={16}/>}</button>
+                                            <button onClick={() => setIsEditingHandover(false)} className="text-slate-400">{X && <X size={16}/>}</button>
                                         </div>
                                     ) : (
                                         <div className="flex flex-col group cursor-pointer" onClick={() => { setTempHandoverDate(handoverDate); setIsEditingHandover(true); }}>
-                                            <div className="flex items-baseline gap-1"><span className="text-2xl font-bold text-rose-700">{countdown}</span><span className="text-sm text-rose-600">天</span></div>
-                                            <div className="flex items-center gap-1"><span className="text-xs text-rose-400 mt-1 decoration-dotted underline underline-offset-2">預計: {handoverDate}</span>{Edit2 && <div className="opacity-0 group-hover:opacity-100 transition-opacity"><Edit2 size={12} className="text-rose-400" /></div>}</div>
+                                            <div className="flex items-baseline gap-1"><span className="text-2xl font-bold text-slate-700">{countdown}</span><span className="text-sm text-slate-500">天</span></div>
+                                            <div className="flex items-center gap-1"><span className="text-xs text-slate-400 mt-1 decoration-dotted underline underline-offset-2">預計: {handoverDate}</span>{Edit2 && <div className="opacity-0 group-hover:opacity-100 transition-opacity"><Edit2 size={12} className="text-teal-500" /></div>}</div>
                                         </div>
                                     )}
                                 </div>
@@ -566,65 +670,65 @@
 
                     {/* Financial Overview */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="bg-slate-800 text-slate-200 rounded-2xl p-5 shadow-sm md:col-span-2 flex flex-col md:flex-row justify-between items-center gap-4">
+                        <div className="bg-white text-slate-800 rounded-2xl p-6 shadow-sm border border-slate-100 md:col-span-2 flex flex-col md:flex-row justify-between items-center gap-4">
                             <div className="flex items-center gap-4">
-                                <div className="bg-slate-700 p-3 rounded-full">{Home && <Home className="text-blue-400" size={24} />}</div>
-                                <div><h3 className="text-xs font-bold text-slate-400 uppercase">已知自備款/工程款總額</h3><div className="text-2xl font-bold text-white">{formatMoney(stats.totalPlannedCost)}</div></div>
+                                <div className="bg-teal-50 p-3 rounded-full">{Home && <Home className="text-teal-600" size={24} />}</div>
+                                <div><h3 className="text-xs font-bold text-slate-500 uppercase">已知自備款/工程款總額</h3><div className="text-2xl font-bold text-slate-800">{formatMoney(stats.totalPlannedCost)}</div></div>
                             </div>
-                            <div className="hidden md:block w-px h-10 bg-slate-600"></div>
+                            <div className="hidden md:block w-px h-10 bg-slate-200"></div>
                             <div className="flex items-center gap-4">
                                 <div>
-                                    <h3 className="text-xs font-bold text-slate-400 uppercase text-right">預估貸款金額</h3>
+                                    <h3 className="text-xs font-bold text-slate-500 uppercase text-right">預估貸款金額</h3>
                                     {isEditingLoan ? (
                                         <div className="flex items-center justify-end gap-1">
-                                            <input type="number" value={tempLoan} onChange={(e) => setTempLoan(Number(e.target.value))} className="w-32 text-lg p-1 border rounded bg-slate-700 text-emerald-400 border-slate-600 text-right focus:outline-none focus:ring-1 focus:ring-emerald-500" autoFocus />
-                                            <button onClick={saveLoanUI} className="text-emerald-500 hover:text-emerald-400 p-1">{Save && <Save size={16}/>}</button>
-                                            <button onClick={() => setIsEditingLoan(false)} className="text-slate-500 hover:text-slate-400 p-1">{X && <X size={16}/>}</button>
+                                            <input type="number" value={tempLoan} onChange={(e) => setTempLoan(Number(e.target.value))} className="w-32 text-lg p-1 border rounded bg-white text-slate-700 border-slate-200 text-right focus:outline-none focus:ring-1 focus:ring-teal-500" autoFocus />
+                                            <button onClick={saveLoanUI} className="text-teal-600 hover:text-teal-700 p-1">{Save && <Save size={16}/>}</button>
+                                            <button onClick={() => setIsEditingLoan(false)} className="text-slate-400 hover:text-slate-500 p-1">{X && <X size={16}/>}</button>
                                         </div>
                                     ) : (
-                                        <div className="text-2xl font-bold text-emerald-400 cursor-pointer hover:text-emerald-300 transition-colors flex items-center justify-end gap-2 group" onClick={() => { setTempLoan(stats.loanAmount); setIsEditingLoan(true); }}>
+                                        <div className="text-2xl font-bold text-slate-700 cursor-pointer hover:text-teal-600 transition-colors flex items-center justify-end gap-2 group" onClick={() => { setTempLoan(stats.loanAmount); setIsEditingLoan(true); }}>
                                             {formatMoney(stats.loanAmount)}
-                                            {Edit2 && <Edit2 size={14} className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-500" />}
+                                            {Edit2 && <Edit2 size={14} className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-300" />}
                                         </div>
                                     )}
-                                    <div className="text-[10px] text-slate-500 text-right">(總價 - 自備款)</div>
+                                    <div className="text-[10px] text-slate-400 text-right">(總價 - 自備款)</div>
                                 </div>
                             </div>
                         </div>
 
-                        <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 flex flex-col justify-center space-y-4 md:col-span-1">
-                            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1">個人累積存款 <span className="text-[10px] text-slate-400 font-normal">(不含自付)</span></h2>
+                        <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 flex flex-col justify-center space-y-4 md:col-span-1">
+                            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1">個人累積存款 <span className="text-[10px] text-slate-400 font-normal">(不含自付工程款)</span></h2>
                             <div className="flex justify-between items-center px-2">
                                 <span className="text-lg font-bold text-slate-700">堯</span>
-                                <div className="text-right"><span className="block text-sm font-bold text-blue-600 font-mono">{formatMoney(stats.yaoSaved)}</span>{stats.yaoPaidDirectly > 0 && <span className="block text-[10px] text-slate-400">另自付: {formatMoney(stats.yaoPaidDirectly)}</span>}</div>
+                                <div className="text-right"><span className="block text-sm font-bold text-sky-600 font-mono">{formatMoney(stats.yaoSaved)}</span>{stats.yaoPaidDirectly > 0 && <span className="block text-[10px] text-slate-400">另自付: {formatMoney(stats.yaoPaidDirectly)}</span>}</div>
                             </div>
                             <div className="w-full h-px bg-slate-100"></div>
                             <div className="flex justify-between items-center px-2">
                                 <span className="text-lg font-bold text-slate-700">璇</span>
-                                <div className="text-right"><span className="block text-sm font-bold text-pink-600 font-mono">{formatMoney(stats.shuanSaved)}</span>{stats.shuanPaidDirectly > 0 && <span className="block text-[10px] text-slate-400">另自付: {formatMoney(stats.shuanPaidDirectly)}</span>}</div>
+                                <div className="text-right"><span className="block text-sm font-bold text-rose-500 font-mono">{formatMoney(stats.shuanSaved)}</span>{stats.shuanPaidDirectly > 0 && <span className="block text-[10px] text-slate-400">另自付: {formatMoney(stats.shuanPaidDirectly)}</span>}</div>
                             </div>
                         </div>
 
-                        <div className="bg-gradient-to-br from-indigo-600 to-blue-700 rounded-2xl p-6 text-white shadow-lg md:col-span-1 relative overflow-hidden">
+                        <div className="bg-slate-800 rounded-2xl p-6 text-white shadow-lg md:col-span-1 relative overflow-hidden">
                             <div className="absolute top-0 right-0 p-4 opacity-10">{Wallet && <Wallet size={120} />}</div>
                             <div className="relative z-10">
-                                <h2 className="text-indigo-100 text-sm font-medium mb-1 flex items-center gap-2">{Calculator && <Calculator size={16} />} 目前公基金餘額 (現金)</h2>
+                                <h2 className="text-slate-300 text-sm font-medium mb-1 flex items-center gap-2">{Calculator && <Calculator size={16} />} 目前公基金餘額 (現金)</h2>
                                 <p className="text-4xl font-bold mb-4 tracking-tight">{formatMoney(stats.currentPool)}</p>
-                                <div className="flex flex-col sm:flex-row gap-4 text-xs text-indigo-200 bg-indigo-800/30 p-3 rounded-lg w-fit">
-                                    <div><span className="block opacity-70">兩人總存款</span><span className="font-bold">{formatMoney(stats.yaoSaved + stats.shuanSaved)}</span></div>
-                                    <div className="hidden sm:block w-px bg-indigo-500/50"></div>
-                                    <div><span className="block opacity-70">公基金已支出</span><span className="font-bold">{formatMoney(stats.totalExpensePaid - (stats.yaoPaidDirectly + stats.shuanPaidDirectly))}</span></div>
+                                <div className="flex flex-col sm:flex-row gap-4 text-xs text-slate-300 bg-white/10 backdrop-blur-sm p-3 rounded-xl w-fit border border-white/10">
+                                    <div><span className="block opacity-70">兩人總存款</span><span className="font-bold text-white">{formatMoney(stats.yaoSaved + stats.shuanSaved)}</span></div>
+                                    <div className="hidden sm:block w-px bg-white/20"></div>
+                                    <div><span className="block opacity-70">公基金已支出</span><span className="font-bold text-white">{formatMoney(stats.totalExpensePaid - (stats.yaoPaidDirectly + stats.shuanPaidDirectly))}</span></div>
                                 </div>
                             </div>
                         </div>
                     </div>
 
                     {/* Breakdown */}
-                    <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 shadow-sm">
-                        <h3 className="font-bold text-slate-700 flex items-center gap-2 mb-4">{PieChart && <PieChart size={18} className="text-purple-500"/>} 目前資金結構 (已實際入帳)</h3>
+                    <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm">
+                        <h3 className="font-bold text-slate-700 flex items-center gap-2 mb-4">{PieChart && <PieChart size={18} className="text-slate-400"/>} 目前資金結構 (已實際入帳)</h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="bg-white p-4 rounded-xl border border-slate-100">
-                                <div className="flex justify-between items-center mb-3 pb-2 border-b border-slate-100"><span className="font-bold text-slate-700">堯</span><span className="font-bold text-blue-600">{formatMoney(breakdown.yao.total)}</span></div>
+                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                                <div className="flex justify-between items-center mb-3 pb-2 border-b border-slate-200"><span className="font-bold text-slate-700">堯</span><span className="font-bold text-sky-600">{formatMoney(breakdown.yao.total)}</span></div>
                                 <div className="space-y-2 text-sm text-slate-600">
                                     <div className="flex justify-between"><span>月存累積</span><span className="font-mono">{formatMoney(breakdown.yao.monthly)}</span></div>
                                     <div className="flex justify-between"><span>季度分紅</span><span className="font-mono">{formatMoney(breakdown.yao.bonus)}</span></div>
@@ -632,8 +736,8 @@
                                     <div className="flex justify-between text-xs text-slate-400"><span>初期資金/校正</span><span className="font-mono">{formatMoney(breakdown.yao.adjustment)}</span></div>
                                 </div>
                             </div>
-                            <div className="bg-white p-4 rounded-xl border border-slate-100">
-                                <div className="flex justify-between items-center mb-3 pb-2 border-b border-slate-100"><span className="font-bold text-slate-700">璇</span><span className="font-bold text-pink-600">{formatMoney(breakdown.shuan.total)}</span></div>
+                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                                <div className="flex justify-between items-center mb-3 pb-2 border-b border-slate-200"><span className="font-bold text-slate-700">璇</span><span className="font-bold text-rose-500">{formatMoney(breakdown.shuan.total)}</span></div>
                                 <div className="space-y-2 text-sm text-slate-600">
                                     <div className="flex justify-between"><span>月存累積</span><span className="font-mono">{formatMoney(breakdown.shuan.monthly)}</span></div>
                                     <div className="flex justify-between"><span>季度分紅</span><span className="font-mono">{formatMoney(breakdown.shuan.bonus)}</span></div>
@@ -646,14 +750,14 @@
 
                     {/* Next Expense Card */}
                     {nextExpense ? (
-                        <div className="bg-white rounded-2xl shadow-md border-t-4 border-amber-400 overflow-hidden">
+                        <div className="bg-white rounded-2xl shadow-md border-t-4 border-slate-600 overflow-hidden">
                             <div className="p-6">
                                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
                                     <div>
-                                        <h2 className="text-slate-500 text-sm font-bold uppercase tracking-wider mb-1 flex items-center gap-2">{AlertCircle && <AlertCircle size={16} className="text-amber-500" />} 下一期應繳工程款</h2>
+                                        <h2 className="text-slate-500 text-sm font-bold uppercase tracking-wider mb-1 flex items-center gap-2">{AlertCircle && <AlertCircle size={16} className="text-slate-600" />} 下一期應繳工程款</h2>
                                         <div className="flex flex-wrap items-baseline gap-2"><span className="text-3xl font-bold text-slate-800">{nextExpense.label}</span><span className="text-sm text-slate-400 font-mono">預計日期: {nextExpense.date}</span></div>
                                     </div>
-                                    <div className={`px-4 py-3 rounded-xl border flex flex-col items-end min-w-[180px] ${balanceStatus.status === 'sufficient' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
+                                    <div className={`px-4 py-3 rounded-xl border flex flex-col items-end min-w-[180px] ${balanceStatus.status === 'sufficient' ? 'bg-teal-50 border-teal-200 text-teal-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
                                         <span className="text-xs font-bold uppercase mb-1">資金預估</span>
                                         <div className="flex items-center gap-1"><span className="text-lg font-bold">{balanceStatus.diff >= 0 ? '+' : ''}{formatMoney(balanceStatus.diff)}</span></div>
                                         <span className="text-xs opacity-80">{balanceStatus.status === 'sufficient' ? '足夠支付' : '資金不足'}</span>
@@ -661,46 +765,46 @@
                                 </div>
                                 <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
                                     <div className="mb-4 flex items-center gap-3">
-                                        <div className="bg-white p-2 rounded-full shadow-sm border">{DollarSign && <DollarSign className="text-amber-600" />}</div>
+                                        <div className="bg-white p-2 rounded-full shadow-sm border border-slate-100">{DollarSign && <DollarSign className="text-slate-400" />}</div>
                                         <div><span className="block text-sm text-slate-500">本期應繳總金額</span><span className="block text-xl font-bold text-slate-800">{formatMoney(nextExpense.cost)}</span></div>
                                     </div>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                                         <div>
                                             <label className="block text-xs font-bold text-slate-500 mb-1">堯 自付/代墊 (若不從公基金扣)</label>
-                                            <input type="number" placeholder="輸入金額" value={expenseInput.yao} onChange={(e) => setExpenseInput(prev => ({...prev, yao: e.target.value}))} className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none"/>
+                                            <input type="number" placeholder="輸入金額" value={expenseInput.yao} onChange={(e) => setExpenseInput(prev => ({...prev, yao: e.target.value}))} className="w-full p-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500 outline-none bg-white"/>
                                         </div>
                                         <div>
                                             <label className="block text-xs font-bold text-slate-500 mb-1">璇 自付/代墊 (若不從公基金扣)</label>
-                                            <input type="number" placeholder="輸入金額" value={expenseInput.shuan} onChange={(e) => setExpenseInput(prev => ({...prev, shuan: e.target.value}))} className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-amber-500 outline-none"/>
+                                            <input type="number" placeholder="輸入金額" value={expenseInput.shuan} onChange={(e) => setExpenseInput(prev => ({...prev, shuan: e.target.value}))} className="w-full p-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500 outline-none bg-white"/>
                                         </div>
                                     </div>
                                     <div className="flex justify-end">
-                                        <button onClick={() => confirmExpenseAction(nextExpense.id)} disabled={balanceStatus.status === 'insufficient' && (parseInt(expenseInput.yao||0) + parseInt(expenseInput.shuan||0)) === 0} className={`px-6 py-3 rounded-lg font-bold flex items-center gap-2 transition-all shadow-sm w-full sm:w-auto justify-center ${balanceStatus.status === 'sufficient' || (parseInt(expenseInput.yao||0) + parseInt(expenseInput.shuan||0)) > 0 ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-amber-200' : 'bg-slate-300 text-slate-500 cursor-not-allowed'}`}>確認繳款 {ArrowRight && <ArrowRight size={18} />}</button>
+                                        <button onClick={() => confirmExpenseAction(nextExpense.id)} disabled={balanceStatus.status === 'insufficient' && (parseInt(expenseInput.yao||0) + parseInt(expenseInput.shuan||0)) === 0} className={`px-6 py-3 rounded-full font-bold flex items-center gap-2 transition-all shadow-sm w-full sm:w-auto justify-center ${balanceStatus.status === 'sufficient' || (parseInt(expenseInput.yao||0) + parseInt(expenseInput.shuan||0)) > 0 ? 'bg-slate-800 hover:bg-slate-700 text-white' : 'bg-slate-300 text-slate-500 cursor-not-allowed'}`}>確認繳款 {ArrowRight && <ArrowRight size={18} />}</button>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     ) : (
-                        <div className="bg-green-100 rounded-2xl p-8 text-center text-green-800 border border-green-200">{CheckCircle2 && <CheckCircle2 size={48} className="mx-auto mb-3" />}<h2 className="text-2xl font-bold">所有工程款項皆已支付完畢！</h2></div>
+                        <div className="bg-teal-50 rounded-2xl p-8 text-center text-teal-800 border border-teal-100 shadow-sm">{CheckCircle2 && <CheckCircle2 size={48} className="mx-auto mb-3" />}<h2 className="text-2xl font-bold">所有工程款項皆已支付完畢！</h2></div>
                     )}
 
                     {/* List */}
-                    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                        <div className="p-4 border-b border-slate-100 bg-slate-50">
-                            <h3 className="font-bold text-slate-700 flex items-center gap-2">{History && <History size={18} />} 資金流動歷程</h3>
+                    <div className="bg-white rounded-3xl shadow-lg shadow-stone-200/50 border border-stone-100 overflow-hidden">
+                        <div className="p-4 border-b border-stone-100 bg-stone-50/50">
+                            <h3 className="font-bold text-stone-700 flex items-center gap-2">{History && <History size={18} />} 資金流動歷程</h3>
                         </div>
-                        <div className="divide-y divide-slate-100">
+                        <div className="divide-y divide-stone-100">
                             {transactions.map((item) => {
                                 if (item.subType === 'adjustment') {
                                     return (
-                                        <div key={item.id} className="p-4 bg-slate-100 border-l-4 border-slate-400">
+                                        <div key={item.id} className="p-4 bg-stone-50 border-l-4 border-stone-300">
                                             <div className="flex items-center gap-4">
-                                                <div className="p-2 bg-white rounded-lg text-slate-500">{Wallet && <Wallet size={20} />}</div>
+                                                <div className="p-2 bg-white rounded-xl text-stone-400 border border-stone-100">{Wallet && <Wallet size={20} />}</div>
                                                 <div className="flex-1 min-w-0">
-                                                    <p className="font-bold text-slate-800 truncate">{item.label}</p>
-                                                    <p className="text-xs text-slate-500 whitespace-nowrap">日期: {item.date}</p>
+                                                    <p className="font-bold text-stone-800 truncate">{item.label}</p>
+                                                    <p className="text-xs text-stone-500 whitespace-nowrap">日期: {item.date}</p>
                                                 </div>
-                                                <div className="text-right text-xs font-mono text-slate-500 shrink-0">
+                                                <div className="text-right text-xs font-mono text-stone-500 shrink-0">
                                                     <div className="mb-1">堯補正: {formatMoney(item.yaoAmount)}</div>
                                                     <div>璇補正: {formatMoney(item.shuanAmount)}</div>
                                                 </div>
@@ -710,24 +814,24 @@
                                 }
                                 if (item.type === 'expense') {
                                     return (
-                                        <div key={item.id} className={`p-4 ${item.paidDate ? 'bg-amber-50/40' : 'bg-white'}`}>
+                                        <div key={item.id} className={`p-4 ${item.paidDate ? 'bg-amber-50/30' : 'bg-white'}`}>
                                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                                                 <div className="flex items-center gap-4 flex-1 min-w-0">
-                                                    <div className={`p-2 rounded-lg shrink-0 ${item.paidDate ? 'bg-amber-200 text-amber-800' : 'bg-slate-100 text-slate-400'}`}>{AlertCircle && <AlertCircle size={24} />}</div>
+                                                    <div className={`p-2 rounded-xl shrink-0 border ${item.paidDate ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-stone-50 text-stone-400 border-stone-100'}`}>{AlertCircle && <AlertCircle size={24} />}</div>
                                                     <div className="flex-1 min-w-0">
-                                                        <p className="font-bold text-slate-800 truncate">{item.label}</p>
-                                                        <p className="text-xs text-slate-500 whitespace-nowrap">日期: {item.date}</p>
-                                                        <p className="text-sm font-bold text-red-600 mt-1">費用: {formatMoney(item.cost)}</p>
+                                                        <p className="font-bold text-stone-800 truncate">{item.label}</p>
+                                                        <p className="text-xs text-stone-500 whitespace-nowrap">日期: {item.date}</p>
+                                                        <p className="text-sm font-bold text-rose-500 mt-1">費用: {formatMoney(item.cost)}</p>
                                                     </div>
                                                 </div>
                                                 {item.paidDate ? (
                                                     <div className="flex flex-col items-end min-w-[120px] shrink-0">
                                                         <span className="flex items-center gap-1 text-green-600 font-bold text-sm">{CheckCircle2 && <CheckCircle2 size={16} />} 已支付</span>
                                                         {item.paidDetails && (item.paidDetails.yao > 0 || item.paidDetails.shuan > 0) ? (
-                                                            <div className="text-xs text-slate-500 mt-1 text-right">{item.paidDetails.yao > 0 && <div>堯自付: {formatMoney(item.paidDetails.yao)}</div>}{item.paidDetails.shuan > 0 && <div>璇自付: {formatMoney(item.paidDetails.shuan)}</div>}</div>
-                                                        ) : (<div className="text-[10px] text-slate-400 mt-1">由公基金支付</div>)}
+                                                            <div className="text-xs text-stone-500 mt-1 text-right">{item.paidDetails.yao > 0 && <div>堯自付: {formatMoney(item.paidDetails.yao)}</div>}{item.paidDetails.shuan > 0 && <div>璇自付: {formatMoney(item.paidDetails.shuan)}</div>}</div>
+                                                        ) : (<div className="text-[10px] text-stone-400 mt-1">由公基金支付</div>)}
                                                     </div>
-                                                ) : (<div className="px-3 py-1 bg-slate-100 text-slate-500 text-xs rounded-full self-start sm:self-center shrink-0">待支付</div>)}
+                                                ) : (<div className="px-3 py-1 bg-stone-100 text-stone-500 text-xs rounded-full self-start sm:self-center shrink-0 font-bold">待支付</div>)}
                                             </div>
                                         </div>
                                     );
@@ -737,60 +841,40 @@
                                 const isEditingShuan = editingTransaction?.id === item.id && editingTransaction?.person === 'shuan';
 
                                 return (
-                                    <div key={item.id} className={`p-4 hover:bg-slate-50 transition-colors ${isFullySaved ? 'bg-green-50/30' : ''}`}>
+                                    <div key={item.id} className={`p-4 hover:bg-stone-50 transition-colors ${isFullySaved ? 'bg-teal-50/20' : ''}`}>
                                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                                             <div className="flex items-center gap-4 flex-1 min-w-0">
-                                                <div className={`p-2 rounded-lg shrink-0 ${item.subType === 'bonus' ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600'}`}>
+                                                <div className={`p-2 rounded-xl shrink-0 border ${item.subType === 'bonus' ? 'bg-purple-50 text-purple-500 border-purple-100' : 'bg-sky-50 text-sky-500 border-sky-100'}`}>
                                                     {item.subType === 'bonus' && Wallet ? <Wallet size={20} /> : (Calendar && <Calendar size={20} />)}
                                                 </div>
                                                 <div className="flex-1 min-w-0">
-                                                    <p className="font-bold text-slate-700 truncate">{item.label}</p>
-                                                    <p className="text-xs text-slate-400 whitespace-nowrap">合計存入: {formatMoney(item.yaoAmount + item.shuanAmount)}</p>
+                                                    <p className="font-bold text-stone-700 truncate">{item.label}</p>
+                                                    <p className="text-xs text-stone-400 whitespace-nowrap">合計存入: {formatMoney(item.yaoAmount + item.shuanAmount)}</p>
                                                 </div>
                                             </div>
                                             <div className="flex gap-2 sm:gap-4 flex-1 justify-end items-center">
                                                 {isEditingYao ? (
-                                                    <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-blue-300 shadow-sm animate-in fade-in zoom-in duration-200">
-                                                        <input type="number" value={editValue} onChange={(e) => setEditValue(e.target.value)} className="w-20 text-sm p-1 border rounded bg-slate-50 focus:outline-none focus:ring-1 focus:ring-blue-500" autoFocus />
-                                                        <button onClick={() => confirmSaving(item.id, 'yao')} className="p-1 bg-green-500 text-white rounded hover:bg-green-600">{Check && <Check size={16} />}</button>
-                                                        <button onClick={cancelEditing} className="p-1 bg-slate-200 text-slate-500 rounded hover:bg-slate-300">{X && <X size={16} />}</button>
+                                                    <div className="flex items-center gap-1 bg-white p-1 rounded-full border border-sky-200 shadow-sm animate-in fade-in zoom-in duration-200">
+                                                        <input type="number" value={editValue} onChange={(e) => setEditValue(e.target.value)} className="w-20 text-sm p-1 border-none bg-transparent focus:outline-none text-center" autoFocus />
+                                                        <button onClick={() => confirmSaving(item.id, 'yao')} className="p-1 bg-green-500 text-white rounded-full hover:bg-green-600">{Check && <Check size={16} />}</button>
+                                                        <button onClick={cancelEditing} className="p-1 bg-stone-200 text-stone-500 rounded-full hover:bg-stone-300">{X && <X size={16} />}</button>
                                                     </div>
                                                 ) : (
-                                                    <button onClick={() => {
-                                                        if (item.yaoPaidDate) {
-                                                            undoSaving(item.id, 'yao');
-                                                        } else {
-                                                            if (new Date(item.date) > new Date()) {
-                                                                const isConfirmed = window.confirm("尚未到達該月份，無法預繳未來款項 🙅‍♂️，如確認預繳，請按確定");
-                                                                if (!isConfirmed) return;
-                                                            }
-                                                            startEditing(item, 'yao');
-                                                        }
-                                                    }} className={`flex items-center gap-2 px-4 py-3 rounded-lg border transition-all min-w-[140px] sm:min-w-[160px] justify-between ${item.yaoPaidDate ? 'bg-green-100 border-green-200 text-green-800' : 'bg-white border-slate-200 text-slate-400 hover:border-blue-400 hover:bg-blue-50'}`}>
-                                                        <span className="text-sm font-bold text-slate-600">堯</span>
+                                                    <button onClick={() => item.yaoPaidDate ? undoSaving(item.id, 'yao') : startEditing(item, 'yao')} className={`flex items-center gap-2 px-4 py-3 rounded-full border transition-all min-w-[140px] sm:min-w-[160px] justify-between ${item.yaoPaidDate ? 'bg-green-100 border-green-200 text-green-800' : 'bg-white border-stone-200 text-stone-400 hover:border-sky-300 hover:bg-sky-50'}`}>
+                                                        <span className="text-sm font-bold text-stone-600">堯</span>
                                                         <div className="text-right"><span className="block text-xs font-bold font-mono">{formatMoney(item.yaoAmount)}</span><span className="block text-[10px] opacity-70">{item.yaoPaidDate ? '已入帳' : '確認存款'}</span></div>
                                                     </button>
                                                 )}
                                                 
                                                 {isEditingShuan ? (
-                                                    <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-blue-300 shadow-sm animate-in fade-in zoom-in duration-200">
-                                                        <input type="number" value={editValue} onChange={(e) => setEditValue(e.target.value)} className="w-20 text-sm p-1 border rounded bg-slate-50 focus:outline-none focus:ring-1 focus:ring-blue-500" autoFocus />
-                                                        <button onClick={() => confirmSaving(item.id, 'shuan')} className="p-1 bg-green-500 text-white rounded hover:bg-green-600">{Check && <Check size={16} />}</button>
-                                                        <button onClick={cancelEditing} className="p-1 bg-slate-200 text-slate-500 rounded hover:bg-slate-300">{X && <X size={16} />}</button>
+                                                    <div className="flex items-center gap-1 bg-white p-1 rounded-full border border-rose-200 shadow-sm animate-in fade-in zoom-in duration-200">
+                                                        <input type="number" value={editValue} onChange={(e) => setEditValue(e.target.value)} className="w-20 text-sm p-1 border-none bg-transparent focus:outline-none text-center" autoFocus />
+                                                        <button onClick={() => confirmSaving(item.id, 'shuan')} className="p-1 bg-green-500 text-white rounded-full hover:bg-green-600">{Check && <Check size={16} />}</button>
+                                                        <button onClick={cancelEditing} className="p-1 bg-stone-200 text-stone-500 rounded-full hover:bg-stone-300">{X && <X size={16} />}</button>
                                                     </div>
                                                 ) : (
-                                                    <button onClick={() => {
-                                                        if (item.shuanPaidDate) {
-                                                            undoSaving(item.id, 'shuan');
-                                                        } else {
-                                                            if (new Date(item.date) > new Date()) {
-                                                                const isConfirmed = window.confirm("尚未到達該月份，無法預繳未來款項 🙅‍♂️，如確認預繳，請按確定");
-                                                                if (!isConfirmed) return;
-                                                            }
-                                                            startEditing(item, 'shuan');
-                                                        }
-                                                    }} className={`flex items-center gap-2 px-4 py-3 rounded-lg border transition-all min-w-[140px] sm:min-w-[160px] justify-between ${item.shuanPaidDate ? 'bg-green-100 border-green-200 text-green-800' : 'bg-white border-slate-200 text-slate-400 hover:border-blue-400 hover:bg-blue-50'}`}>
-                                                        <span className="text-sm font-bold text-slate-600">璇</span>
+                                                    <button onClick={() => item.shuanPaidDate ? undoSaving(item.id, 'shuan') : startEditing(item, 'shuan')} className={`flex items-center gap-2 px-4 py-3 rounded-full border transition-all min-w-[140px] sm:min-w-[160px] justify-between ${item.shuanPaidDate ? 'bg-green-100 border-green-200 text-green-800' : 'bg-white border-stone-200 text-stone-400 hover:border-rose-300 hover:bg-rose-50'}`}>
+                                                        <span className="text-sm font-bold text-stone-600">璇</span>
                                                         <div className="text-right"><span className="block text-xs font-bold font-mono">{item.shuanAmount}</span><span className="block text-[10px] opacity-70">{item.shuanPaidDate ? '已入帳' : '確認存款'}</span></div>
                                                     </button>
                                                 )}
@@ -802,11 +886,21 @@
                         </div>
                     </div>
                 </div>
+            )
+        };
+        
+        const RootComponent = () => {
+            const [isAuthenticated, setIsAuthenticated] = useState(false);
+            
+            return isAuthenticated ? (
+                <App />
+            ) : (
+                <LoginScreen onLogin={() => setIsAuthenticated(true)} />
             );
         };
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
+        root.render(<RootComponent />);
     </script>
 </body>
 </html>
